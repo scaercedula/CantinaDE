@@ -9,11 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "jspdf": "^4.0.0",
+    "jspdf-autotable": "^5.0.7",
+    "pocketbase": "0.21.5",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "pocketbase": "0.21.5",
-    "jspdf": "2.5.1",
-    "jspdf-autotable": "3.8.2",
     "xlsx": "0.18.5"
   },
   "devDependencies": {
