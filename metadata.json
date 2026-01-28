@@ -1,0 +1,5 @@
+{
+  "name": "Cantina Militar - Sistema Integrado",
+  "description": "Sistema de gestão de cantina militar com interface LiquidGlass. Gerencia pedidos de cadetes, fluxo de caixa da cantina e auditoria da diretoria.",
+  "requestFramePermissions": []
+}
