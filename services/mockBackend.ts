@@ -8,13 +8,13 @@ import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse } fr
 
 // 1. URL do seu Backend PocketBase
 // IMPORTANTE: Não use a barra '/' ou '/_/' no final. Apenas protocolo://ip:porta
-const POCKETBASE_URL = import.meta.env.DADOSLOGIN; 
+const POCKETBASE_URL = import.meta.env.VITE_DADOSLOGIN; 
 
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
 // A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
-const GOOGLE_API_KEY: string = import.meta.env.APIKEY;
-const GOOGLE_SHEET_ID = import.meta.env.SHEET_ID;
+const GOOGLE_API_KEY: string = import.meta.env.VITE_API;
+const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 class BackendService {
   private pb: PocketBase;
