@@ -1,41 +1,26 @@
 import PocketBase from 'pocketbase';
 import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse } from '../types';
 
-// ============================================================================
-// CONFIGURAÇÕES DE PRODUÇÃO
-// Preencha as chaves abaixo
-// ============================================================================
 
-// 1. URL do seu Backend PocketBase
-// IMPORTANTE: Não use a barra '/' ou '/_/' no final. Apenas protocolo://ip:porta
 const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS; 
-
-// 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
-// A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
-// A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
 const GOOGLE_API_KEY = import.meta.env.VITE_API;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
-
 class BackendService {
   private pb: PocketBase;
-
+  
   constructor() {
     this.pb = new PocketBase(POCKETBASE_URL);
     this.pb.autoCancellation(false);
   }
 
-  // --- AUTENTICAÇÃO (POCKETBASE JWT) ---
-
   async login(email: string, senha: string): Promise<ApiResponse<Usuario>> {
     try {
-      // O SDK gerencia o JWT e o armazena no LocalStorage automaticamente
       const authData = await this.pb.collection('users').authWithPassword(email, senha);
       return { sucesso: true, dados: this.mapUser(authData.record) };
     } catch (error: any) {
       console.error('Erro no login:', error);
       
-      // Tratamento específico de erros
       if (error.status === 0) {
         const isHttps = window.location.protocol === 'https:';
         const isHttpBackend = POCKETBASE_URL.startsWith('http:');
@@ -48,7 +33,6 @@ class BackendService {
         return { sucesso: false, mensagem: 'Email ou senha inválidos.' };
       }
       
-      // Recupera mensagem de erro original do PocketBase
       const msg = error?.response?.message || error?.message || 'Erro desconhecido ao autenticar.';
       return { sucesso: false, mensagem: msg };
     }
@@ -56,16 +40,12 @@ class BackendService {
 
   async cadastrar(dados: any): Promise<ApiResponse<Usuario>> {
     try {
-      // Cria usuário com perfil padrão CADETE
-      // Geramos um username simples para garantir unicidade
       const baseUsername = dados.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
       const randomSuffix = Math.random().toString(36).slice(2, 6);
       const generatedUsername = `${baseUsername}_${randomSuffix}`.toLowerCase();
-
       const payload = {
         username: generatedUsername,
         email: dados.email,
-        // emailVisibility: true, // REMOVIDO: Evita erro 403, pois requer admin na maioria das configs
         password: dados.senha,
         passwordConfirm: dados.senha,
         nomeCompleto: dados.nomeCompleto,
@@ -75,15 +55,11 @@ class BackendService {
       };
 
       await this.pb.collection('users').create(payload);
-      
-      // Realiza o login imediatamente após o cadastro para pegar o Token
       return this.login(dados.email, dados.senha);
     } catch (error: any) {
       console.error('Erro detalhado no cadastro:', JSON.stringify(error));
-      
       let msg = 'Erro ao processar cadastro.';
       
-      // Tenta extrair erro de validação (ex: email já existe)
       const responseData = error?.response?.data || error?.data;
       
       if (responseData && Object.keys(responseData).length > 0) {
@@ -104,7 +80,6 @@ class BackendService {
         return { sucesso: false, mensagem: `${fieldName}: ${errorDesc}` };
       }
 
-      // Erros genéricos de status
       if (error?.status === 404) {
          msg = "Servidor PocketBase não encontrado (404).";
       } else if (error?.status === 0) {
@@ -144,18 +119,15 @@ class BackendService {
     }
   }
 
-  // --- PRODUTOS & PLANILHA GOOGLE ---
-
   async getProdutos(): Promise<Produto[]> {
-    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "OIbrDgA_eXalvil06BqSQS1PpsFD_lkpPkihLnQ") {
+    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "api_is_not_config") {
       console.warn('API Key do Google não configurada.');
       return [];
     }
 
     try {
-      const range = 'Produtos!A2:E'; // Pula cabeçalho
+      const range = 'Produtos!A2:E';
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEET_ID}/values/${range}?key=${GOOGLE_API_KEY}`;
-      
       const response = await fetch(url);
       const data = await response.json();
 
@@ -174,8 +146,6 @@ class BackendService {
       return [];
     }
   }
-
-  // --- PEDIDOS (POCKETBASE - DATABASE) ---
 
   async criarPedido(usuario: Usuario, itens: any[], total: number): Promise<ApiResponse<Pedido>> {
     try {
