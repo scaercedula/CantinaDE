@@ -13,8 +13,8 @@ const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS;
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
 // A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
-const GOOGLE_API_KEY = "AIzaSyA_eEiawjOJ6bQSOS0JpcFA_NgpccgzSnA";
-const GOOGLE_SHEET_ID = "1RmemRKc-TPzVS5uzA2uEtPYUoZcmXZVYOm5s0Rqou28";
+const GOOGLE_API_KEY = import.meta.env.VITE_API;
+const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 
 class BackendService {
@@ -147,7 +147,7 @@ class BackendService {
   // --- PRODUTOS & PLANILHA GOOGLE ---
 
   async getProdutos(): Promise<Produto[]> {
-    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "AIzaSyA_eEiawjOJ6bQSOS0JpcFA_NgpccgzSnA") {
+    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "OIbrDgA_eXalvil06BqSQS1PpsFD_lkpPkihLnQ") {
       console.warn('API Key do Google não configurada.');
       return [];
     }
