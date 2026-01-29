@@ -13,7 +13,7 @@ const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS;
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
 // A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
-const GOOGLE_API_KEY = "AIzaSyA_eEiawjOJ6bQSOS0JpcFA_NgpccgzSnA";
+const GOOGLE_API_KEY = import.meta.env.VITE_API;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 
