@@ -147,7 +147,7 @@ class BackendService {
   // --- PRODUTOS & PLANILHA GOOGLE ---
 
   async getProdutos(): Promise<Produto[]> {
-    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === import.meta.env.VITE_API) {
+    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === "AIzaSyA_eEiawjOJ6bQSOS0JpcFA_NgpccgzSnA") {
       console.warn('API Key do Google não configurada.');
       return [];
     }
