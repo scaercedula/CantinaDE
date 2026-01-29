@@ -13,7 +13,7 @@ const POCKETBASE_URL = import.meta.env.VITE_DADOSLOGIN;
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
 // A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
-const GOOGLE_API_KEY: string = import.meta.env.VITE_API_KEY;
+const GOOGLE_API_KEY: string = import.meta.env.VITE_API;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 class BackendService {
@@ -146,7 +146,7 @@ class BackendService {
   // --- PRODUTOS & PLANILHA GOOGLE ---
 
   async getProdutos(): Promise<Produto[]> {
-    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === import.meta.env.VITE_API_KEY) {
+    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === import.meta.env.VITE_API) {
       console.warn('API Key do Google não configurada.');
       return [];
     }
