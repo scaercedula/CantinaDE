@@ -8,13 +8,13 @@ import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse } fr
 
 // 1. URL do seu Backend PocketBase
 // IMPORTANTE: Não use a barra '/' ou '/_/' no final. Apenas protocolo://ip:porta
-const POCKETBASE_URL = 'https://bdsvepcktbs2.e-papeletas.com.br/'; 
+const POCKETBASE_URL = import.meta.env.VITE_DADOSLOGIN; 
 
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
 // A: Nome, B: Descricao, C: Preco, D: ImagemURL, E: Categoria
-const GOOGLE_API_KEY: string = 'AIzaSyBr7RsHXpR_PTqWzTrjc33aO21pYmWPNAo';
-const GOOGLE_SHEET_ID = '1qV4grGtCoNBGeHT-fA7HajSBKXwwcfJj_23GbU-NAVQ';
+const GOOGLE_API_KEY: string = import.meta.env.VITE_API_KEY;
+const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 class BackendService {
   private pb: PocketBase;
@@ -146,7 +146,7 @@ class BackendService {
   // --- PRODUTOS & PLANILHA GOOGLE ---
 
   async getProdutos(): Promise<Produto[]> {
-    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === 'AIzaSyAYJBbUlFfolfyvX2aYvaGHXF59a-PX7cg') {
+    if (!GOOGLE_API_KEY || GOOGLE_API_KEY === import.meta.env.VITE_API_KEY) {
       console.warn('API Key do Google não configurada.');
       return [];
     }
