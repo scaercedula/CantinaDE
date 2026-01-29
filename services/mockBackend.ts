@@ -8,7 +8,7 @@ import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse } fr
 
 // 1. URL do seu Backend PocketBase
 // IMPORTANTE: Não use a barra '/' ou '/_/' no final. Apenas protocolo://ip:porta
-const POCKETBASE_URL = 'http://127.0.0.1:8090'; 
+const POCKETBASE_URL = 'https://bdsvepcktbs2.e-papeletas.com.br/'; 
 
 // 2. Configurações da Planilha Google (Para o Cardápio de Produtos)
 // A planilha deve ter uma aba chamada 'Produtos' com as colunas na ordem: 
