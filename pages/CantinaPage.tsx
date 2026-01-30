@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Pedido, StatusPedido } from '../types';
-import { mockBackend } from '../services/mockBackend';
+import { loginAPI } from '../services/loginAPI';
 import { GlassCard, GlassButton, StatusBadge, StatCard } from '../components/GlassUI';
 import { Icons } from '../components/Icons';
 import { jsPDF } from 'jspdf';
@@ -69,7 +69,7 @@ export const CantinaPage: React.FC = () => {
     // Carrega a lista de usuários base (sem filtro) apenas para uso na Fila (mapeamento)
     // Para o relatório oficial, o useEffect abaixo cuidará disso
     if (tab === 'FILA') {
-        mockBackend.getRelatorioFinanceiro().then(setRelatorio);
+        loginAPI.getRelatorioFinanceiro().then(setRelatorio);
         loadDataFila();
         const interval = setInterval(loadDataFila, 5000);
         return () => clearInterval(interval);
@@ -81,7 +81,7 @@ export const CantinaPage: React.FC = () => {
     if (tab === 'RELATORIO') {
       setLoadingRelatorio(true);
       // Passa as datas calculadas para o backend filtrar
-      mockBackend.getRelatorioFinanceiro(fiscalPeriod.startDate, fiscalPeriod.endDate).then(data => {
+      loginAPI.getRelatorioFinanceiro(fiscalPeriod.startDate, fiscalPeriod.endDate).then(data => {
         setRelatorio(data);
         setLoadingRelatorio(false);
       });
@@ -92,7 +92,7 @@ export const CantinaPage: React.FC = () => {
 
   const loadDataFila = async () => {
     if (loadingId) return;
-    const all = await mockBackend.getPedidos();
+    const all = await loginAPI.getPedidos();
     setPedidos(all);
     
     const hoje = new Date().toDateString();
@@ -106,7 +106,7 @@ export const CantinaPage: React.FC = () => {
   const handleStatus = async (id: string, status: StatusPedido) => {
     setLoadingId(id);
     try {
-      const res = await mockBackend.atualizarStatusPedido(id, status);
+      const res = await loginAPI.atualizarStatusPedido(id, status);
       if (res.sucesso) {
         setPedidos(prev => prev.map(p => p.id === id ? { ...p, status } : p));
         await loadDataFila(); 
@@ -155,7 +155,7 @@ export const CantinaPage: React.FC = () => {
   const openCadetDetails = async (cadete: RelatorioCadete) => {
     setSelectedCadet(cadete);
     setLoadingDetails(true);
-    const orders = await mockBackend.getPedidos(cadete.id);
+    const orders = await loginAPI.getPedidos(cadete.id);
     
     // Filtramos localmente para exibir no detalhe apenas o que compõe o saldo do relatório
     const filteredOrders = orders.filter(o => {
