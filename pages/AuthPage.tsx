@@ -13,10 +13,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
-  // Form States
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
-  const [confirmarSenha, setConfirmarSenha] = useState(''); // Novo estado
+  const [confirmarSenha, setConfirmarSenha] = useState('');
   const [nome, setNome] = useState('');
   const [guerra, setGuerra] = useState('');
   const [numero, setNumero] = useState('');
@@ -31,24 +30,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
       if (mode === 'LOGIN') {
         const res = await mockBackend.login(email, senha);
         if (res.sucesso && res.dados) onLogin(res.dados);
-        else setError(res.mensagem || 'Credenciais inválidas.');
+        else setError(res.mensagem || 'Login ou senha errados');
       } 
       else if (mode === 'REGISTER') {
-        // Validações locais antes de chamar o backend
         if (numero.length !== 5 || isNaN(Number(numero))) {
           setError('O número deve conter exatamente 5 dígitos.');
           setLoading(false);
           return;
         }
         
-        // Validação de Senha (8 dígitos)
         if (senha.length < 8) {
           setError('A senha precisa ter no mínimo 8 caracteres para sua segurança.');
           setLoading(false);
           return;
         }
 
-        // Validação de Confirmação de Senha
         if (senha !== confirmarSenha) {
           setError('As senhas não coincidem. Por favor, verifique.');
           setLoading(false);
@@ -131,7 +127,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
                   type="password" 
                   value={senha} 
                   onChange={e => setSenha(e.target.value)} 
-                  placeholder="••••••"
+                  placeholder="••••••••"
                   required 
                 />
                 
