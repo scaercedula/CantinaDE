@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Usuario, Produto, Pedido, ItemCarrinho } from '../types';
-import { mockBackend } from '../services/mockBackend';
+import { loginAPI } from '../services/loginAPI';
 import { StatusBadge, GlassCard } from '../components/GlassUI';
 import { Icons } from '../components/Icons';
 
@@ -27,12 +27,12 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const [isCartExpanded, setIsCartExpanded] = useState(false);
 
   useEffect(() => {
-    mockBackend.getProdutos().then(setProdutos);
+    loginAPI.getProdutos().then(setProdutos);
     loadHistory();
   }, []);
 
   const loadHistory = () => {
-    mockBackend.getPedidos(usuario.id).then(setHistorico);
+    loginAPI.getPedidos(usuario.id).then(setHistorico);
   };
 
   const addToCart = (p: Produto) => {
@@ -53,7 +53,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const finalizarPedido = async () => {
     if (carrinho.length === 0) return;
     const total = carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
-    await mockBackend.criarPedido(usuario, carrinho, total);
+    await loginAPI.criarPedido(usuario, carrinho, total);
     setCarrinho([]);
     setIsCartExpanded(false);
     setTab('PEDIDOS');
