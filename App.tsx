@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Usuario, PerfilUsuario } from './types';
-import { mockBackend } from './services/mockBackend';
+import { loginAPI } from './services/loginAPI';
 import { Icons } from './components/Icons';
 import { AuthPage } from './pages/AuthPage';
 import { CadetePage } from './pages/CadetePage';
@@ -11,12 +11,12 @@ const App: React.FC = () => {
   const [user, setUser] = useState<Usuario | null>(null);
 
   useEffect(() => {
-    const saved = mockBackend.getUsuarioAtual();
+    const saved = loginAPI.getUsuarioAtual();
     if (saved) setUser(saved);
   }, []);
 
   const handleLogout = () => {
-    mockBackend.logout();
+    loginAPI.logout();
     setUser(null);
   };
 
