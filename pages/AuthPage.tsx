@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Usuario } from '../types';
-import { mockBackend } from '../services/mockBackend';
+import { loginAPI } from '../services/loginAPI';
 import { GlassCard, GlassInput, GlassButton } from '../components/GlassUI';
 
 interface AuthPageProps {
@@ -28,7 +28,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
 
     try {
       if (mode === 'LOGIN') {
-        const res = await mockBackend.login(email, senha);
+        const res = await loginAPI.login(email, senha);
         if (res.sucesso && res.dados) onLogin(res.dados);
         else setError(res.mensagem || 'Login ou senha errados');
       } 
@@ -51,7 +51,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
           return;
         }
 
-        const res = await mockBackend.cadastrar({ 
+        const res = await loginAPI.cadastrar({ 
           email, 
           senha, 
           nomeCompleto: nome, 
@@ -62,7 +62,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
         else setError(res.mensagem || 'Erro ao cadastrar.');
       }
       else if (mode === 'RECOVER') {
-        const res = await mockBackend.recuperarSenha(email);
+        const res = await loginAPI.recuperarSenha(email);
         setMsg(res.mensagem || 'Verifique seu email.');
         if (res.sucesso) {
             setTimeout(() => setMode('LOGIN'), 3000);
