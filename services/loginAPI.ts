@@ -270,4 +270,4 @@ class BackendService {
   }
 }
 
-export const mockBackend = new BackendService();
+export const loginAPI = new BackendService();
