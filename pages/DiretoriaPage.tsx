@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { mockBackend } from '../services/mockBackend';
+import { loginAPI } from '../services/loginAPI';
 import { GlassCard, GlassButton, StatusBadge } from '../components/GlassUI';
 import { Pedido } from '../types';
 
@@ -47,7 +47,7 @@ export const DiretoriaPage: React.FC = () => {
   useEffect(() => {
     setLoading(true);
     // Passa as datas para o backend filtrar
-    mockBackend.getRelatorioFinanceiro(fiscalPeriod.startDate, fiscalPeriod.endDate).then(data => {
+    loginAPI.getRelatorioFinanceiro(fiscalPeriod.startDate, fiscalPeriod.endDate).then(data => {
       setRelatorio(data);
       setLoading(false);
     });
@@ -85,7 +85,7 @@ export const DiretoriaPage: React.FC = () => {
     setSelectedCadet(cadete);
     setLoadingHistorico(true);
     // Busca os pedidos filtrados pelo ID do usuário
-    const pedidos = await mockBackend.getPedidos(cadete.id);
+    const pedidos = await loginAPI.getPedidos(cadete.id);
     
     // Filtra localmente os pedidos para bater com o período fiscal selecionado
     const pedidosFiltrados = pedidos.filter(p => {
