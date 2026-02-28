@@ -43,6 +43,8 @@ export interface Pedido {
   valorTotal: number;
   data: string; // ISO String
   status: StatusPedido;
+  userAgent?: string;
+  ip?: string;
 }
 
 // Interface para respostas simuladas da API

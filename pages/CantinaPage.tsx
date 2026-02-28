@@ -39,8 +39,16 @@ export const CantinaPage: React.FC = () => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   // Filtro de Datas (Relatório)
-  // Define o mês de referência atual por padrão
-  const [refMonth, setRefMonth] = useState(new Date().getMonth());
+  // Define o mês de referência atual por padrão (Ajustado para regra fiscal)
+  const [refMonth, setRefMonth] = useState(() => {
+    const hoje = new Date();
+    const dia = hoje.getDate();
+    const mes = hoje.getMonth();
+    // Se dia >= 20, o mês de referência é 2 meses à frente (ex: 20/Fev -> Abril)
+    // Se dia < 20, o mês de referência é 1 mês à frente (ex: 10/Mar -> Abril)
+    const target = dia >= 20 ? mes + 2 : mes + 1;
+    return target % 12;
+  });
   // Ano sempre atual
   
   // Modal de Detalhes
@@ -192,69 +200,179 @@ export const CantinaPage: React.FC = () => {
   const totalGeralRelatorio = relatorio.reduce((acc, r) => acc + r.totalGasto, 0);
 
   // --- Funções de Exportação ---
-  const getExportData = () => {
-    return relatorio.map(r => ({
-      'Número': r.numero,
-      'Nome de Guerra': r.guerra,
-      'Valor Total': r.totalGasto.toFixed(2)
-    }));
+  
+  const getGroupedData = () => {
+    const groups: { [key: string]: RelatorioCadete[] } = {
+      '1º Ano': [], '2º Ano': [], '3º Ano': [], '4º Ano': [], 'Outros': []
+    };
+    const currentYearShort = new Date().getFullYear() % 100;
+
+    relatorio.forEach(cadete => {
+      const prefixStr = cadete.numero ? cadete.numero.substring(0, 2) : '00';
+      const prefix = parseInt(prefixStr, 10);
+      let anoCurso = (currentYearShort - prefix) + 1;
+      let key = (anoCurso >= 1 && anoCurso <= 4) ? `${anoCurso}º Ano` : 'Outros';
+      groups[key].push(cadete);
+    });
+    return groups;
   };
 
   const handleExportXLSX = () => {
     const currentYear = new Date().getFullYear();
+    const groups = getGroupedData();
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(getExportData());
-    XLSX.utils.book_append_sheet(wb, ws, "Relatorio");
-    XLSX.writeFile(wb, `relatorio_cantina_${MESES[refMonth]}_${currentYear}.xlsx`);
+    
+    // Aba Geral
+    const wsData = [
+      ["Relatório Financeiro - Cantina", `Referência: ${MESES[refMonth]}/${currentYear}`],
+      ["Período", `${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`],
+      [],
+      ["Número", "Nome de Guerra", "Nome Completo", "Turma", "Quantidade de Pedidos", "Total Gasto (R$)"]
+    ];
+
+    let totalGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+      if (groups[turma].length > 0) {
+        let totalTurma = 0;
+        groups[turma].forEach(r => {
+          wsData.push([r.numero, r.guerra, r.nome, turma, r.qtdPedidos.toString(), r.totalGasto.toFixed(2)]);
+          totalTurma += r.totalGasto;
+        });
+        // Linha de Total da Turma
+        wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurma.toFixed(2)]);
+        wsData.push([]); // Espaço
+        totalGeral += totalTurma;
+      }
+    });
+
+    wsData.push(["", "", "TOTAL GERAL", "", "", totalGeral.toFixed(2)]);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, "Resumo Financeiro");
+    XLSX.writeFile(wb, `cantina_financeiro_${MESES[refMonth]}_${currentYear}.xlsx`);
     setIsExportMenuOpen(false);
   };
 
   const handleExportPDF = () => {
     const currentYear = new Date().getFullYear();
     const doc = new jsPDF();
+    const groups = getGroupedData();
+    
     doc.setFontSize(16);
-    doc.text(`Relatório da Cantina - ${MESES[refMonth]}/${currentYear}`, 14, 16);
+    doc.text(`Relatório Cantina - ${MESES[refMonth]}/${currentYear}`, 14, 16);
     doc.setFontSize(10);
     doc.text(`Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`, 14, 24);
     
-    const tableColumn = ["Número", "Nome de Guerra", "Valor Total (R$)"];
     const tableRows: any[] = [];
+    let totalGeral = 0;
 
-    relatorio.forEach(r => {
-      const rowData = [r.numero, r.guerra, r.totalGasto.toFixed(2)];
-      tableRows.push(rowData);
+    Object.keys(groups).forEach(turma => {
+      if (groups[turma].length > 0) {
+        // Cabeçalho da Turma
+        tableRows.push([{ content: turma.toUpperCase(), colSpan: 4, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
+        
+        let totalTurma = 0;
+        groups[turma].forEach(r => {
+          tableRows.push([r.numero, r.guerra, r.qtdPedidos, `R$ ${r.totalGasto.toFixed(2)}`]);
+          totalTurma += r.totalGasto;
+        });
+        
+        // Total da Turma
+        tableRows.push([{ content: `Total ${turma}: R$ ${totalTurma.toFixed(2)}`, colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } }]);
+        totalGeral += totalTurma;
+      }
     });
 
+    // Total Geral
+    tableRows.push([{ content: `TOTAL GERAL: R$ ${totalGeral.toFixed(2)}`, colSpan: 4, styles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold', halign: 'right' } }]);
+
     autoTable(doc, {
-      head: [tableColumn],
+      head: [["Número", "Nome de Guerra", "Quantidade de Pedidos", "Total"]],
       body: tableRows,
       startY: 30,
     });
 
-    doc.save(`relatorio_cantina_${MESES[refMonth]}.pdf`);
+    doc.save(`cantina_relatorio_${MESES[refMonth]}.pdf`);
     setIsExportMenuOpen(false);
   };
 
   const handleExportDOCX = () => {
     const currentYear = new Date().getFullYear();
-    const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Relatório</title></head><body>`;
-    let table = `<h2 style="font-family: Arial">Relatório Cantina - ${MESES[refMonth]}/${currentYear}</h2>`;
-    table += `<p>Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}</p>`;
-    table += '<table border="1" style="border-collapse: collapse; width: 100%; font-family: Arial">';
-    table += '<tr style="background-color: #eee"><th>Número</th><th>Nome</th><th>Total (R$)</th></tr>';
-    relatorio.forEach(r => {
-      table += `<tr><td>${r.numero}</td><td>${r.guerra}</td><td>${r.totalGasto.toFixed(2)}</td></tr>`;
+    const groups = getGroupedData();
+    
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Relatório</title></head><body>`;
+    html += `<h2 style="font-family: Arial">Relatório Cantina - ${MESES[refMonth]}/${currentYear}</h2>`;
+    html += `<p style="font-family: Arial">Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}</p>`;
+    
+    html += '<table border="1" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px">';
+    html += '<tr style="background-color: #333; color: white;"><th>Número</th><th>Nome de Guerra</th><th>Turma</th><th>Total (R$)</th></tr>';
+    
+    let totalGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+      if (groups[turma].length > 0) {
+        let totalTurma = 0;
+        // Cabeçalho Turma
+        html += `<tr style="background-color: #eee;"><td colspan="4"><strong>${turma}</strong></td></tr>`;
+        
+        groups[turma].forEach(r => {
+          html += `<tr><td>${r.numero}</td><td>${r.guerra}</td><td>${turma}</td><td style="text-align: right">${r.totalGasto.toFixed(2)}</td></tr>`;
+          totalTurma += r.totalGasto;
+        });
+        
+        // Total Turma
+        html += `<tr><td colspan="3" style="text-align: right"><strong>Total ${turma}:</strong></td><td style="text-align: right"><strong>${totalTurma.toFixed(2)}</strong></td></tr>`;
+        totalGeral += totalTurma;
+      }
     });
-    table += '</table></body></html>';
-    const source = header + table;
-    const blob = new Blob(['\ufeff', source], { type: 'application/msword' });
+
+    html += `<tr style="background-color: #333; color: white;"><td colspan="3" style="text-align: right"><strong>TOTAL GERAL:</strong></td><td style="text-align: right"><strong>${totalGeral.toFixed(2)}</strong></td></tr>`;
+    html += '</table></body></html>';
+    
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `relatorio_cantina_${MESES[refMonth]}.doc`;
+    link.download = `cantina_relatorio_${MESES[refMonth]}.doc`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setIsExportMenuOpen(false);
+  };
+
+  const handleExportAudit = async () => {
+    // Busca TODOS os pedidos para filtrar localmente e gerar auditoria
+    const allPedidos = await loginAPI.getPedidos();
+    const pedidosPeriodo = allPedidos.filter(p => {
+       const d = new Date(p.data);
+       return d >= fiscalPeriod.startDate && d <= fiscalPeriod.endDate && p.status !== 'CANCELADO';
+    });
+
+    const wb = XLSX.utils.book_new();
+    const wsData = [
+      ["AUDITORIA DETALHADA DE PEDIDOS - CANTINA", `Referência: ${MESES[refMonth]}`],
+      ["Data/Hora", "Cadete", "Guerra", "Itens", "Valor Total", "Status", "IP Origem", "Dispositivo (User Agent)"]
+    ];
+
+    pedidosPeriodo.forEach(p => {
+      const itensStr = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+      const dataFormatada = new Date(p.data).toLocaleString();
+      wsData.push([
+        dataFormatada,
+        p.usuarioNome,
+        p.usuarioGuerra,
+        itensStr,
+        p.valorTotal.toFixed(2),
+        p.status,
+        p.ip || 'N/A',
+        p.userAgent || 'N/A'
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, "Auditoria Completa");
+    XLSX.writeFile(wb, `auditoria_cantina_${MESES[refMonth]}.xlsx`);
     setIsExportMenuOpen(false);
   };
 
@@ -457,16 +575,20 @@ export const CantinaPage: React.FC = () => {
 
                {/* Dropdown Menu */}
                {isExportMenuOpen && (
-                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-fade-in">
+                 <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-fade-in">
                    <div className="p-2 space-y-1">
                       <button onClick={handleExportXLSX} className="w-full text-left px-4 py-3 hover:bg-green-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
-                         <span className="text-green-600 text-lg">📊</span> Excel (.xlsx)
+                         <span className="text-green-600 text-lg">📊</span> Excel (Resumo)
                       </button>
                       <button onClick={handleExportPDF} className="w-full text-left px-4 py-3 hover:bg-red-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
-                         <span className="text-red-500 text-lg">📄</span> PDF (.pdf)
+                         <span className="text-red-500 text-lg">📄</span> PDF (Resumo)
                       </button>
                       <button onClick={handleExportDOCX} className="w-full text-left px-4 py-3 hover:bg-blue-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
-                         <span className="text-blue-600 text-lg">📝</span> Word (.doc)
+                         <span className="text-blue-600 text-lg">📝</span> Word (Resumo)
+                      </button>
+                      <div className="h-px bg-gray-100 my-1"></div>
+                      <button onClick={handleExportAudit} className="w-full text-left px-4 py-3 hover:bg-purple-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
+                          <span className="text-purple-600 text-lg">🕵️</span> Auditoria Completa (IP/Log)
                       </button>
                    </div>
                  </div>
@@ -496,8 +618,8 @@ export const CantinaPage: React.FC = () => {
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs uppercase tracking-wider">
                           <th className="p-5 font-bold w-24">Nº</th>
-                          <th className="p-5 font-bold">Guerra</th>
-                          <th className="p-5 font-bold text-center">Qtd</th>
+                          <th className="p-5 font-bold">Nome de Guerra</th>
+                          <th className="p-5 font-bold text-center">Quantidade de Pedidos</th>
                           <th className="p-5 font-bold text-right">Total</th>
                         </tr>
                       </thead>

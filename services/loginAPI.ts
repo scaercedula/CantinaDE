@@ -1,7 +1,6 @@
 import PocketBase from 'pocketbase';
 import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse } from '../types';
 
-
 const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS; 
 const GOOGLE_API_KEY = import.meta.env.VITE_API;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
@@ -147,7 +146,7 @@ class BackendService {
     }
   }
 
-  async criarPedido(usuario: Usuario, itens: any[], total: number): Promise<ApiResponse<Pedido>> {
+  async criarPedido(usuario: Usuario, itens: any[], total: number, meta?: { ip?: string, userAgent?: string }): Promise<ApiResponse<Pedido>> {
     try {
       const dados = {
         usuarioId: usuario.id,
@@ -155,7 +154,9 @@ class BackendService {
         usuarioGuerra: usuario.nomeDeGuerra,
         itens: itens, // PocketBase armazena JSON nativamente
         valorTotal: total,
-        status: StatusPedido.PENDENTE
+        status: StatusPedido.PENDENTE,
+        userAgent: meta?.userAgent || navigator.userAgent,
+        ip: meta?.ip || ''
       };
       
       const record = await this.pb.collection('pedidos').create(dados);
@@ -177,7 +178,7 @@ class BackendService {
         filter = `usuarioId = "${filtroUsuarioId}"`;
       }
 
-      const records = await this.pb.collection('pedidos').getList(1, 100, {
+      const records = await this.pb.collection('pedidos').getList(1, 500, {
         filter,
         sort: '-created'
       });
@@ -190,7 +191,9 @@ class BackendService {
         itens: r.itens,
         valorTotal: r.valorTotal,
         status: r.status,
-        data: r.created
+        data: r.created,
+        userAgent: r.userAgent,
+        ip: r.ip
       }));
     } catch (e) {
       console.error('Erro ao buscar pedidos:', e);

@@ -20,11 +20,20 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
   const [historico, setHistorico] = useState<Pedido[]>([]);
   
-  // Filtros de Data (Padrão: Mês atual)
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  // Filtros de Data (Padrão: Ajustado conforme regra fiscal: dia 20-19)
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const hoje = new Date();
+    const dia = hoje.getDate();
+    const mes = hoje.getMonth();
+    // Se dia >= 20, o mês de referência é 2 meses à frente (ex: 20/Fev -> Abril)
+    // Se dia < 20, o mês de referência é 1 mês à frente (ex: 10/Mar -> Abril)
+    const target = dia >= 20 ? mes + 2 : mes + 1;
+    return target % 12;
+  });
   const [isMonthSelectorOpen, setIsMonthSelectorOpen] = useState(false);
   
   const [isCartExpanded, setIsCartExpanded] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     loginAPI.getProdutos().then(setProdutos);
@@ -51,13 +60,36 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   };
 
   const finalizarPedido = async () => {
-    if (carrinho.length === 0) return;
-    const total = carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
-    await loginAPI.criarPedido(usuario, carrinho, total);
-    setCarrinho([]);
-    setIsCartExpanded(false);
-    setTab('PEDIDOS');
-    loadHistory();
+    if (carrinho.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+
+    try {
+      const total = carrinho.reduce((acc, i) => acc + (i.preco * i.quantidade), 0);
+      
+      // Tenta capturar IP (silenciosamente)
+      let userIp = '';
+      try {
+        const res = await fetch('https://api.ipify.org?format=json');
+        const data = await res.json();
+        userIp = data.ip;
+      } catch (e) {
+        console.warn('Não foi possível capturar IP');
+      }
+
+      await loginAPI.criarPedido(usuario, carrinho, total, {
+        ip: userIp,
+        userAgent: navigator.userAgent
+      });
+
+      setCarrinho([]);
+      setIsCartExpanded(false);
+      setTab('PEDIDOS');
+      loadHistory();
+    } catch (error) {
+      console.error("Erro ao finalizar pedido:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Cálculo do Período Fiscal
@@ -145,12 +177,25 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
                 </div>
                 <button 
                   onClick={finalizarPedido}
-                  className="w-full py-4 bg-gray-900 hover:bg-black text-white rounded-xl font-bold text-lg shadow-xl shadow-gray-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 group"
+                  disabled={isSubmitting}
+                  className={`w-full py-4 bg-gray-900 hover:bg-black text-white rounded-xl font-bold text-lg shadow-xl shadow-gray-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 group ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
-                  <span>Confirmar Pedido</span>
-                  <span className="group-hover:translate-x-1 transition-transform">
-                     <Icons.Cart />
-                  </span>
+                  {isSubmitting ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Processando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Confirmar Pedido</span>
+                      <span className="group-hover:translate-x-1 transition-transform">
+                         <Icons.Cart />
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
