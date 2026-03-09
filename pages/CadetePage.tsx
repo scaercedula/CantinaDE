@@ -442,7 +442,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
       </div>
 
       {/* Navigation Tabs - Simplificado (Murphy's Law: Obvious & Simple) */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <button
           onClick={() => setTab('MENU')}
           className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MENU' ? 'bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
