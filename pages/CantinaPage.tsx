@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Pedido, StatusPedido } from '../types';
+import { createPortal } from 'react-dom';
+import { Pedido, StatusPedido, Usuario } from '../types';
 import { loginAPI } from '../services/loginAPI';
 import { GlassCard, GlassButton, StatusBadge, StatCard } from '../components/GlassUI';
 import { Icons } from '../components/Icons';
+import { getEsquadrao } from '../utils';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -14,6 +16,8 @@ interface RelatorioCadete {
   guerra: string;
   numero: string;
   totalGasto: number;
+  totalCantina: number;
+  totalCidade: number;
   ultimaCompra: string;
   qtdPedidos: number;
 }
@@ -24,7 +28,8 @@ const MESES = [
 ];
 
 export const CantinaPage: React.FC = () => {
-  const [tab, setTab] = useState<'FILA' | 'RELATORIO'>('FILA');
+  const [painel, setPainel] = useState<'CANTINA' | 'CIDADE'>('CANTINA');
+  const [tab, setTab] = useState<'FILA' | 'RELATORIO' | 'SALGADADAS'>('FILA');
   
   // --- Estados da Fila ---
   const [filaSubTab, setFilaSubTab] = useState<'ABERTO' | 'HISTORICO'>('ABERTO');
@@ -33,10 +38,19 @@ export const CantinaPage: React.FC = () => {
   const [vendasTotal, setVendasTotal] = useState(0);
   const [qtdPedidosHoje, setQtdPedidosHoje] = useState(0);
 
+  // --- Estados Salgadada ---
+  const [eventosSalgadada, setEventosSalgadada] = useState<any[]>([]);
+  const [loadingSalgadadas, setLoadingSalgadadas] = useState(false);
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]); // Lista completa de usuários para rateio
+
   // --- Estados do Relatório & Detalhes ---
   const [relatorio, setRelatorio] = useState<RelatorioCadete[]>([]);
   const [loadingRelatorio, setLoadingRelatorio] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  
+  // Relatório Diário
+  const [isDailyReportModalOpen, setIsDailyReportModalOpen] = useState(false);
+  const [dailyReportDate, setDailyReportDate] = useState(new Date().toISOString().split('T')[0]);
   
   // Filtro de Datas (Relatório)
   // Define o mês de referência atual por padrão (Ajustado para regra fiscal)
@@ -74,6 +88,9 @@ export const CantinaPage: React.FC = () => {
 
   // Carrega dados iniciais da fila e usuários
   useEffect(() => {
+    // Carrega usuários para uso no rateio de salgadadas
+    loginAPI.getUsuariosParaSalgadada().then(setUsuarios);
+
     // Carrega a lista de usuários base (sem filtro) apenas para uso na Fila (mapeamento)
     // Para o relatório oficial, o useEffect abaixo cuidará disso
     if (tab === 'FILA') {
@@ -82,7 +99,14 @@ export const CantinaPage: React.FC = () => {
         const interval = setInterval(loadDataFila, 5000);
         return () => clearInterval(interval);
     }
-  }, [tab]);
+    if (tab === 'SALGADADAS') {
+      setLoadingSalgadadas(true);
+      loginAPI.getEventosSalgadada().then(data => {
+        setEventosSalgadada(data);
+        setLoadingSalgadadas(false);
+      });
+    }
+  }, [tab, painel]);
 
   // Atualiza relatório ao entrar na aba ou mudar o filtro
   useEffect(() => {
@@ -94,13 +118,13 @@ export const CantinaPage: React.FC = () => {
         setLoadingRelatorio(false);
       });
     }
-  }, [tab, fiscalPeriod]);
+  }, [tab, fiscalPeriod, painel]);
 
   // --- Lógica da Fila ---
 
   const loadDataFila = async () => {
     if (loadingId) return;
-    const all = await loginAPI.getPedidos();
+    const all = await loginAPI.getPedidos(undefined, painel); // Passa a origem (CANTINA ou CIDADE)
     setPedidos(all);
     
     const hoje = new Date().toDateString();
@@ -126,6 +150,41 @@ export const CantinaPage: React.FC = () => {
       alert("Erro inesperado ao processar ação.");
     } finally {
       setLoadingId(null);
+    }
+  };
+
+  const handleStatusSalgadada = async (id: string, status: StatusPedido) => {
+    console.log('>>> handleStatusSalgadada CHAMADO para ID:', id, 'Status:', status);
+    
+    // Removido check de loading para garantir que o clique sempre funcione para debug
+    // if (loadingSalgadadas) return;
+
+    // Confirmações removidas conforme solicitado
+    // if (status === StatusPedido.CONCLUIDO && !window.confirm('Confirmar entrega desta salgadada? Isso marcará o evento como CONCLUÍDO.')) return;
+    // if (status === StatusPedido.CANCELADO && !window.confirm('Tem certeza que deseja CANCELAR esta salgadada?')) return;
+
+    setLoadingSalgadadas(true);
+    try {
+      console.log(`Iniciando atualização de status salgadada ${id} para ${status}`);
+      const res = await loginAPI.atualizarStatusEventoSalgadada(id, status);
+      
+      if (res.sucesso) {
+        console.log('Sucesso na atualização, atualizando estado local...');
+        // Atualização Otimista
+        setEventosSalgadada(prev => prev.map(e => e.id === id ? { ...e, status } : e));
+        
+        // Recarrega em background para garantir consistência
+        const data = await loginAPI.getEventosSalgadada();
+        setEventosSalgadada(data);
+      } else {
+        console.error('Erro retornado pela API:', res.mensagem);
+        alert(res.mensagem || "Erro ao atualizar salgadada.");
+      }
+    } catch (error) {
+      console.error("Erro crítico na UI (Salgadada):", error);
+      alert("Erro inesperado ao processar ação.");
+    } finally {
+      setLoadingSalgadadas(false);
     }
   };
 
@@ -197,7 +256,11 @@ export const CantinaPage: React.FC = () => {
     return groups;
   }, [relatorio]);
 
-  const totalGeralRelatorio = relatorio.reduce((acc, r) => acc + r.totalGasto, 0);
+  // Calcula o total geral baseado no painel selecionado
+  const totalGeralRelatorio = relatorio.reduce((acc, r) => {
+    const valor = painel === 'CANTINA' ? (r.totalCantina || 0) : (r.totalCidade || 0);
+    return acc + valor;
+  }, 0);
 
   // --- Funções de Exportação ---
   
@@ -222,9 +285,12 @@ export const CantinaPage: React.FC = () => {
     const groups = getGroupedData();
     const wb = XLSX.utils.book_new();
     
+    const titulo = painel === 'CANTINA' ? "Relatório Financeiro - Cantina" : "Relatório Financeiro - Loja da Cidade";
+    const nomeArquivo = painel === 'CANTINA' ? `cantina_financeiro_${MESES[refMonth]}` : `cidade_financeiro_${MESES[refMonth]}`;
+
     // Aba Geral
     const wsData = [
-      ["Relatório Financeiro - Cantina", `Referência: ${MESES[refMonth]}/${currentYear}`],
+      [titulo, `Referência: ${MESES[refMonth]}/${currentYear}`],
       ["Período", `${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`],
       [],
       ["Número", "Nome de Guerra", "Nome Completo", "Turma", "Quantidade de Pedidos", "Total Gasto (R$)"]
@@ -236,64 +302,272 @@ export const CantinaPage: React.FC = () => {
       if (groups[turma].length > 0) {
         let totalTurma = 0;
         groups[turma].forEach(r => {
-          wsData.push([r.numero, r.guerra, r.nome, turma, r.qtdPedidos.toString(), r.totalGasto.toFixed(2)]);
-          totalTurma += r.totalGasto;
+          const valor = painel === 'CANTINA' ? r.totalCantina : r.totalCidade;
+          if (valor > 0) {
+             wsData.push([r.numero, r.guerra, r.nome, turma, r.qtdPedidos.toString(), valor.toFixed(2)]);
+             totalTurma += valor;
+          }
         });
-        // Linha de Total da Turma
-        wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurma.toFixed(2)]);
-        wsData.push([]); // Espaço
-        totalGeral += totalTurma;
+        
+        if (totalTurma > 0) {
+            // Linha de Total da Turma
+            wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurma.toFixed(2)]);
+            wsData.push([]); // Espaço
+            totalGeral += totalTurma;
+        }
       }
     });
 
     wsData.push(["", "", "TOTAL GERAL", "", "", totalGeral.toFixed(2)]);
 
+    // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
+    wsData.push([]);
+    wsData.push([]);
+    wsData.push(["------------------------------------------------------------"]);
+    wsData.push(["RESUMO GERAL POR ESQUADRÃO"]);
+    wsData.push(["Esquadrão", "Total Cantina (R$)", "Total Cidade (R$)", "Total Geral (R$)"]);
+
+    let somaCantina = 0;
+    let somaCidade = 0;
+    let somaGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+        if (turma === 'Outros') return; 
+        
+        const totalTurmaCantina = groups[turma].reduce((acc, r) => acc + r.totalCantina, 0);
+        const totalTurmaCidade = groups[turma].reduce((acc, r) => acc + r.totalCidade, 0);
+        const totalTurmaGeral = totalTurmaCantina + totalTurmaCidade;
+
+        wsData.push([
+            turma, 
+            totalTurmaCantina.toFixed(2), 
+            totalTurmaCidade.toFixed(2), 
+            totalTurmaGeral.toFixed(2)
+        ]);
+
+        somaCantina += totalTurmaCantina;
+        somaCidade += totalTurmaCidade;
+        somaGeral += totalTurmaGeral;
+    });
+
+    wsData.push([
+        "TOTAL ACUMULADO", 
+        somaCantina.toFixed(2), 
+        somaCidade.toFixed(2), 
+        somaGeral.toFixed(2)
+    ]);
+
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     XLSX.utils.book_append_sheet(wb, ws, "Resumo Financeiro");
-    XLSX.writeFile(wb, `cantina_financeiro_${MESES[refMonth]}_${currentYear}.xlsx`);
+    XLSX.writeFile(wb, `${nomeArquivo}_${currentYear}.xlsx`);
     setIsExportMenuOpen(false);
   };
 
-  const handleExportPDF = () => {
+  const handleExportSeparatedXLSX = () => {
+    const currentYear = new Date().getFullYear();
+    const groups = getGroupedData();
+    const wb = XLSX.utils.book_new();
+    
+    // Aba Geral
+    const wsData = [
+      ["Relatório Financeiro Detalhado (Cantina vs Cidade)", `Referência: ${MESES[refMonth]}/${currentYear}`],
+      ["Período", `${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`],
+      [],
+      ["Número", "Nome de Guerra", "Nome Completo", "Turma", "Qtd Pedidos", "Cantina (R$)", "Cidade (R$)", "Total (R$)"]
+    ];
+
+    let totalGeralCantina = 0;
+    let totalGeralCidade = 0;
+    let totalGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+      if (groups[turma].length > 0) {
+        let totalTurmaCantina = 0;
+        let totalTurmaCidade = 0;
+        let totalTurma = 0;
+
+        groups[turma].forEach(r => {
+          wsData.push([
+            r.numero, 
+            r.guerra, 
+            r.nome, 
+            turma, 
+            r.qtdPedidos.toString(), 
+            r.totalCantina.toFixed(2),
+            r.totalCidade.toFixed(2),
+            r.totalGasto.toFixed(2)
+          ]);
+          totalTurmaCantina += r.totalCantina;
+          totalTurmaCidade += r.totalCidade;
+          totalTurma += r.totalGasto;
+        });
+        
+        // Linha de Total da Turma
+        wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurmaCantina.toFixed(2), totalTurmaCidade.toFixed(2), totalTurma.toFixed(2)]);
+        wsData.push([]); // Espaço
+        
+        totalGeralCantina += totalTurmaCantina;
+        totalGeralCidade += totalTurmaCidade;
+        totalGeral += totalTurma;
+      }
+    });
+
+    wsData.push(["", "", "TOTAL GERAL", "", "", totalGeralCantina.toFixed(2), totalGeralCidade.toFixed(2), totalGeral.toFixed(2)]);
+
+    // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
+    wsData.push([]);
+    wsData.push([]);
+    wsData.push(["------------------------------------------------------------"]);
+    wsData.push(["RESUMO GERAL POR ESQUADRÃO"]);
+    wsData.push(["Esquadrão", "Total Cantina (R$)", "Total Cidade (R$)", "Total Geral (R$)"]);
+
+    let somaCantina = 0;
+    let somaCidade = 0;
+    let somaGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+        if (turma === 'Outros') return; 
+        
+        const totalTurmaCantina = groups[turma].reduce((acc, r) => acc + r.totalCantina, 0);
+        const totalTurmaCidade = groups[turma].reduce((acc, r) => acc + r.totalCidade, 0);
+        const totalTurmaGeral = totalTurmaCantina + totalTurmaCidade;
+
+        wsData.push([
+            turma, 
+            totalTurmaCantina.toFixed(2), 
+            totalTurmaCidade.toFixed(2), 
+            totalTurmaGeral.toFixed(2)
+        ]);
+
+        somaCantina += totalTurmaCantina;
+        somaCidade += totalTurmaCidade;
+        somaGeral += totalTurmaGeral;
+    });
+
+    wsData.push([
+        "TOTAL ACUMULADO", 
+        somaCantina.toFixed(2), 
+        somaCidade.toFixed(2), 
+        somaGeral.toFixed(2)
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, "Relatório Detalhado");
+    XLSX.writeFile(wb, `relatorio_separado_${MESES[refMonth]}_${currentYear}.xlsx`);
+    setIsExportMenuOpen(false);
+  };
+
+  const handleExportUnifiedPDF = () => {
     const currentYear = new Date().getFullYear();
     const doc = new jsPDF();
     const groups = getGroupedData();
     
     doc.setFontSize(16);
-    doc.text(`Relatório Cantina - ${MESES[refMonth]}/${currentYear}`, 14, 16);
+    doc.text(`Relatório Financeiro Integrado - ${MESES[refMonth]}/${currentYear}`, 14, 16);
     doc.setFontSize(10);
     doc.text(`Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`, 14, 24);
     
     const tableRows: any[] = [];
+    let totalGeralCantina = 0;
+    let totalGeralCidade = 0;
     let totalGeral = 0;
 
     Object.keys(groups).forEach(turma => {
       if (groups[turma].length > 0) {
         // Cabeçalho da Turma
-        tableRows.push([{ content: turma.toUpperCase(), colSpan: 4, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
+        tableRows.push([{ content: turma.toUpperCase(), colSpan: 6, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
         
+        let totalTurmaCantina = 0;
+        let totalTurmaCidade = 0;
         let totalTurma = 0;
+
         groups[turma].forEach(r => {
-          tableRows.push([r.numero, r.guerra, r.qtdPedidos, `R$ ${r.totalGasto.toFixed(2)}`]);
+          tableRows.push([
+             r.numero, 
+             r.guerra, 
+             r.qtdPedidos, 
+             `R$ ${r.totalCantina.toFixed(2)}`,
+             `R$ ${r.totalCidade.toFixed(2)}`,
+             `R$ ${r.totalGasto.toFixed(2)}`
+          ]);
+          totalTurmaCantina += r.totalCantina;
+          totalTurmaCidade += r.totalCidade;
           totalTurma += r.totalGasto;
         });
         
         // Total da Turma
-        tableRows.push([{ content: `Total ${turma}: R$ ${totalTurma.toFixed(2)}`, colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } }]);
+        tableRows.push([{ 
+            content: `Total ${turma}:   Cantina: R$ ${totalTurmaCantina.toFixed(2)}   Cidade: R$ ${totalTurmaCidade.toFixed(2)}   Total: R$ ${totalTurma.toFixed(2)}`, 
+            colSpan: 6, 
+            styles: { fontStyle: 'bold', halign: 'right' } 
+        }]);
+        
+        totalGeralCantina += totalTurmaCantina;
+        totalGeralCidade += totalTurmaCidade;
         totalGeral += totalTurma;
       }
     });
 
     // Total Geral
-    tableRows.push([{ content: `TOTAL GERAL: R$ ${totalGeral.toFixed(2)}`, colSpan: 4, styles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold', halign: 'right' } }]);
+    tableRows.push([{ 
+        content: `TOTAL GERAL:   Cantina: R$ ${totalGeralCantina.toFixed(2)}   Cidade: R$ ${totalGeralCidade.toFixed(2)}   Total: R$ ${totalGeral.toFixed(2)}`, 
+        colSpan: 6, 
+        styles: { fillColor: [245, 158, 11], textColor: 255, fontStyle: 'bold', halign: 'right' } 
+    }]);
 
     autoTable(doc, {
-      head: [["Número", "Nome de Guerra", "Quantidade de Pedidos", "Total"]],
+      head: [["Número", "Nome de Guerra", "Qtd", "Cantina", "Cidade", "Total"]],
       body: tableRows,
       startY: 30,
     });
 
-    doc.save(`cantina_relatorio_${MESES[refMonth]}.pdf`);
+    // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
+    doc.addPage();
+    doc.setFontSize(14);
+    doc.text("Resumo Geral por Esquadrão", 14, 20);
+    
+    const summaryRows: any[] = [];
+    let somaCantina = 0;
+    let somaCidade = 0;
+    let somaGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+        if (turma === 'Outros') return;
+        
+        const totalTurmaCantina = groups[turma].reduce((acc, r) => acc + r.totalCantina, 0);
+        const totalTurmaCidade = groups[turma].reduce((acc, r) => acc + r.totalCidade, 0);
+        const totalTurmaGeral = totalTurmaCantina + totalTurmaCidade;
+
+        summaryRows.push([
+            turma, 
+            `R$ ${totalTurmaCantina.toFixed(2)}`, 
+            `R$ ${totalTurmaCidade.toFixed(2)}`, 
+            `R$ ${totalTurmaGeral.toFixed(2)}`
+        ]);
+
+        somaCantina += totalTurmaCantina;
+        somaCidade += totalTurmaCidade;
+        somaGeral += totalTurmaGeral;
+    });
+
+    summaryRows.push([
+        { content: "TOTAL ACUMULADO", styles: { fontStyle: 'bold' } },
+        { content: `R$ ${somaCantina.toFixed(2)}`, styles: { fontStyle: 'bold' } },
+        { content: `R$ ${somaCidade.toFixed(2)}`, styles: { fontStyle: 'bold' } },
+        { content: `R$ ${somaGeral.toFixed(2)}`, styles: { fontStyle: 'bold', fillColor: [245, 158, 11], textColor: 255 } }
+    ]);
+
+    autoTable(doc, {
+      head: [["Esquadrão", "Total Cantina", "Total Cidade", "Total Geral"]],
+      body: summaryRows,
+      startY: 30,
+      theme: 'grid',
+      headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [240, 248, 255] },
+      styles: { fontSize: 12, cellPadding: 6 }
+    });
+
+    doc.save(`relatorio_integrado_${MESES[refMonth]}.pdf`);
     setIsExportMenuOpen(false);
   };
 
@@ -301,12 +575,15 @@ export const CantinaPage: React.FC = () => {
     const currentYear = new Date().getFullYear();
     const groups = getGroupedData();
     
+    const titulo = painel === 'CANTINA' ? "Relatório Cantina" : "Relatório Loja da Cidade";
+    const nomeArquivo = painel === 'CANTINA' ? `cantina_relatorio_${MESES[refMonth]}` : `cidade_relatorio_${MESES[refMonth]}`;
+
     let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Relatório</title></head><body>`;
-    html += `<h2 style="font-family: Arial">Relatório Cantina - ${MESES[refMonth]}/${currentYear}</h2>`;
+    html += `<h2 style="font-family: Arial">${titulo} - ${MESES[refMonth]}/${currentYear}</h2>`;
     html += `<p style="font-family: Arial">Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}</p>`;
     
-    html += '<table border="1" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px">';
-    html += '<tr style="background-color: #333; color: white;"><th>Número</th><th>Nome de Guerra</th><th>Turma</th><th>Total (R$)</th></tr>';
+    html += '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px; border: 1px solid #ddd;">';
+    html += '<tr style="background-color: #2c3e50; color: white;"><th>Número</th><th>Nome de Guerra</th><th>Turma</th><th>Total (R$)</th></tr>';
     
     let totalGeral = 0;
 
@@ -317,24 +594,66 @@ export const CantinaPage: React.FC = () => {
         html += `<tr style="background-color: #eee;"><td colspan="4"><strong>${turma}</strong></td></tr>`;
         
         groups[turma].forEach(r => {
-          html += `<tr><td>${r.numero}</td><td>${r.guerra}</td><td>${turma}</td><td style="text-align: right">${r.totalGasto.toFixed(2)}</td></tr>`;
-          totalTurma += r.totalGasto;
+          const valor = painel === 'CANTINA' ? r.totalCantina : r.totalCidade;
+          if (valor > 0) {
+             html += `<tr><td>${r.numero}</td><td>${r.guerra}</td><td>${turma}</td><td style="text-align: right">${valor.toFixed(2)}</td></tr>`;
+             totalTurma += valor;
+          }
         });
         
-        // Total Turma
-        html += `<tr><td colspan="3" style="text-align: right"><strong>Total ${turma}:</strong></td><td style="text-align: right"><strong>${totalTurma.toFixed(2)}</strong></td></tr>`;
-        totalGeral += totalTurma;
+        if (totalTurma > 0) {
+            // Total Turma
+            html += `<tr><td colspan="3" style="text-align: right"><strong>Total ${turma}:</strong></td><td style="text-align: right"><strong>${totalTurma.toFixed(2)}</strong></td></tr>`;
+            totalGeral += totalTurma;
+        }
       }
     });
 
-    html += `<tr style="background-color: #333; color: white;"><td colspan="3" style="text-align: right"><strong>TOTAL GERAL:</strong></td><td style="text-align: right"><strong>${totalGeral.toFixed(2)}</strong></td></tr>`;
+    html += `<tr style="background-color: #f39c12; color: white;"><td colspan="3" style="text-align: right"><strong>TOTAL GERAL:</strong></td><td style="text-align: right"><strong>${totalGeral.toFixed(2)}</strong></td></tr>`;
+    html += '</table>';
+
+    // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
+    html += '<br/><br/>';
+    html += '<h3 style="font-family: Arial; color: #333;">Resumo Geral por Esquadrão</h3>';
+    html += '<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px; border: 1px solid #ddd;">';
+    html += '<tr style="background-color: #2980b9; color: white;"><th>Esquadrão</th><th>Total Cantina (R$)</th><th>Total Cidade (R$)</th><th>Total Geral (R$)</th></tr>';
+
+    let somaCantina = 0;
+    let somaCidade = 0;
+    let somaGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+        if (turma === 'Outros') return;
+        
+        const totalTurmaCantina = groups[turma].reduce((acc, r) => acc + r.totalCantina, 0);
+        const totalTurmaCidade = groups[turma].reduce((acc, r) => acc + r.totalCidade, 0);
+        const totalTurmaGeral = totalTurmaCantina + totalTurmaCidade;
+
+        html += `<tr>
+            <td><strong>${turma}</strong></td>
+            <td style="text-align: right">${totalTurmaCantina.toFixed(2)}</td>
+            <td style="text-align: right">${totalTurmaCidade.toFixed(2)}</td>
+            <td style="text-align: right">${totalTurmaGeral.toFixed(2)}</td>
+        </tr>`;
+
+        somaCantina += totalTurmaCantina;
+        somaCidade += totalTurmaCidade;
+        somaGeral += totalTurmaGeral;
+    });
+
+    html += `<tr style="background-color: #f59e0b; color: white;">
+        <td style="text-align: right"><strong>TOTAL ACUMULADO:</strong></td>
+        <td style="text-align: right"><strong>${somaCantina.toFixed(2)}</strong></td>
+        <td style="text-align: right"><strong>${somaCidade.toFixed(2)}</strong></td>
+        <td style="text-align: right"><strong>${somaGeral.toFixed(2)}</strong></td>
+    </tr>`;
     html += '</table></body></html>';
     
     const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `cantina_relatorio_${MESES[refMonth]}.doc`;
+    link.download = `${nomeArquivo}.doc`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -370,37 +689,177 @@ export const CantinaPage: React.FC = () => {
       ]);
     });
 
+    // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
+    wsData.push([]);
+    wsData.push([]);
+    wsData.push(["------------------------------------------------------------"]);
+    wsData.push(["RESUMO GERAL POR ESQUADRÃO"]);
+    wsData.push(["Esquadrão", "Total Cantina (R$)", "Total Cidade (R$)", "Total Geral (R$)"]);
+
+    const groups = getGroupedData();
+    let somaCantina = 0;
+    let somaCidade = 0;
+    let somaGeral = 0;
+
+    Object.keys(groups).forEach(turma => {
+        if (turma === 'Outros') return; 
+        
+        const totalTurmaCantina = groups[turma].reduce((acc, r) => acc + r.totalCantina, 0);
+        const totalTurmaCidade = groups[turma].reduce((acc, r) => acc + r.totalCidade, 0);
+        const totalTurmaGeral = totalTurmaCantina + totalTurmaCidade;
+
+        wsData.push([
+            turma, 
+            totalTurmaCantina.toFixed(2), 
+            totalTurmaCidade.toFixed(2), 
+            totalTurmaGeral.toFixed(2)
+        ]);
+
+        somaCantina += totalTurmaCantina;
+        somaCidade += totalTurmaCidade;
+        somaGeral += totalTurmaGeral;
+    });
+
+    wsData.push([
+        "TOTAL ACUMULADO", 
+        somaCantina.toFixed(2), 
+        somaCidade.toFixed(2), 
+        somaGeral.toFixed(2)
+    ]);
+
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     XLSX.utils.book_append_sheet(wb, ws, "Auditoria Completa");
     XLSX.writeFile(wb, `auditoria_cantina_${MESES[refMonth]}.xlsx`);
     setIsExportMenuOpen(false);
   };
 
-  // --- Render ---
+  const handleExportDailyReport = async (format: 'PDF' | 'XLSX') => {
+    const allPedidos = await loginAPI.getPedidos(undefined, painel);
+    const targetDate = new Date(dailyReportDate + 'T12:00:00').toDateString();
+    
+    // Filtra pedidos do dia selecionado, excluindo cancelados
+    const pedidosDoDia = allPedidos.filter(p => 
+      new Date(p.data).toDateString() === targetDate && 
+      p.status !== StatusPedido.CANCELADO
+    );
 
+    const totalDoDia = pedidosDoDia.reduce((acc, p) => acc + p.valorTotal, 0);
+    const dataFormatada = new Date(dailyReportDate + 'T12:00:00').toLocaleDateString();
+    const titulo = `Relatório Diário - ${painel === 'CANTINA' ? 'Cantina' : 'Loja da Cidade'}`;
+
+    if (format === 'XLSX') {
+      const wb = XLSX.utils.book_new();
+      const wsData: any[][] = [
+        [titulo, `Data: ${dataFormatada}`],
+        ["Total de Vendas", `R$ ${totalDoDia.toFixed(2)}`],
+        ["Total de Pedidos", pedidosDoDia.length.toString()],
+        [],
+        ["Hora", "Cadete", "Esquadrão", "Itens", "Valor (R$)"]
+      ];
+
+      pedidosDoDia.forEach(p => {
+        const cadete = relatorio.find(r => r.id === p.usuarioId);
+        const esquadrao = getEsquadrao(cadete?.numero || '', cadete?.esquadrao);
+        const itensStr = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+        wsData.push([
+          new Date(p.data).toLocaleTimeString(),
+          p.usuarioGuerra,
+          esquadrao || '-',
+          itensStr,
+          p.valorTotal.toFixed(2)
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, "Relatório Diário");
+      XLSX.writeFile(wb, `relatorio_diario_${painel.toLowerCase()}_${dailyReportDate}.xlsx`);
+    } else {
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.text(titulo, 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Data: ${dataFormatada}`, 14, 24);
+      doc.text(`Total de Vendas: R$ ${totalDoDia.toFixed(2)}`, 14, 30);
+      doc.text(`Total de Pedidos: ${pedidosDoDia.length}`, 14, 36);
+
+      const tableRows = pedidosDoDia.map(p => {
+        const cadete = relatorio.find(r => r.id === p.usuarioId);
+        const esquadrao = getEsquadrao(cadete?.numero || '', cadete?.esquadrao);
+        const itensStr = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+        return [
+          new Date(p.data).toLocaleTimeString(),
+          p.usuarioGuerra,
+          esquadrao || '-',
+          itensStr,
+          `R$ ${p.valorTotal.toFixed(2)}`
+        ];
+      });
+
+      autoTable(doc, {
+        head: [["Hora", "Cadete", "Esquadrão", "Itens", "Valor"]],
+        body: tableRows,
+        startY: 45,
+      });
+
+      doc.save(`relatorio_diario_${painel.toLowerCase()}_${dailyReportDate}.pdf`);
+    }
+    setIsDailyReportModalOpen(false);
+    setIsExportMenuOpen(false);
+  };
+
+  // --- Render ---
   return (
     <div className="space-y-8 relative">
       
-      {/* Header com Abas Principais */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-        <h2 className="text-2xl font-extrabold text-gray-800">Painel da Cantina</h2>
-        <div className="flex p-1 bg-white rounded-xl border border-gray-200 shadow-sm w-full md:w-auto">
+      {/* Header com Abas Principais e Seletor de Painel */}
+      <div className="flex flex-col gap-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-extrabold text-gray-800">
+            {painel === 'CANTINA' ? 'Painel da Cantina' : 'Painel da Cidade'}
+          </h2>
+          
+          {/* Toggle de Painel */}
+          <div className="flex bg-gray-100 p-1 rounded-xl">
+            <button
+              onClick={() => setPainel('CANTINA')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${painel === 'CANTINA' ? 'bg-white text-brand-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Cantina
+            </button>
+            <button
+              onClick={() => setPainel('CIDADE')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${painel === 'CIDADE' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Loja da Cidade
+            </button>
+          </div>
+        </div>
+
+        <div className="flex p-1 bg-white rounded-xl border border-gray-200 shadow-sm w-full md:w-auto overflow-x-auto">
           <button 
             onClick={() => setTab('FILA')}
-            className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'FILA' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+            className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'FILA' ? (painel === 'CANTINA' ? 'bg-gray-900' : 'bg-blue-900') + ' text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
           >
             Fila de Pedidos
           </button>
           <button 
             onClick={() => setTab('RELATORIO')}
-            className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'RELATORIO' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+            className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'RELATORIO' ? (painel === 'CANTINA' ? 'bg-gray-900' : 'bg-blue-900') + ' text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
           >
             Relatório Geral
           </button>
+          {painel === 'CANTINA' && (
+            <button 
+              onClick={() => setTab('SALGADADAS')}
+              className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'SALGADADAS' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+            >
+              Salgadadas
+            </button>
+          )}
         </div>
       </div>
 
-      {tab === 'FILA' ? (
+      {tab === 'FILA' && (
         // === VIEW: FILA DE PEDIDOS ===
         <>
           {/* Dashboard Stats */}
@@ -447,44 +906,49 @@ export const CantinaPage: React.FC = () => {
                            {turma} ({pedidosTurma.length})
                          </h3>
                          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
-                           {pedidosTurma.map(p => (
-                             <GlassCard key={p.id} className="p-6 border-l-[6px] border-l-brand-500 shadow-sm hover:shadow-md transition-all">
-                               <div className="flex justify-between items-start mb-4">
-                                 <div>
-                                   <div className="flex items-center gap-2">
-                                     <h4 className="font-extrabold text-xl text-gray-900">{p.usuarioGuerra}</h4>
-                                     <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{turma}</span>
+                           {pedidosTurma.map(p => {
+                             const cadete = relatorio.find(r => r.id === p.usuarioId);
+                             const esquadrao = getEsquadrao(cadete?.numero || '');
+                             
+                             return (
+                               <GlassCard key={p.id} className="p-6 border-l-[6px] border-l-brand-500 shadow-sm hover:shadow-md transition-all">
+                                 <div className="flex justify-between items-start mb-4">
+                                   <div>
+                                     <div className="flex items-center gap-2">
+                                       <h4 className="font-extrabold text-xl text-gray-900">{p.usuarioGuerra}</h4>
+                                       <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{esquadrao || turma}</span>
+                                     </div>
+                                     <span className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1 mt-1">
+                                       <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span>
+                                       Pedido às {new Date(p.data).toLocaleTimeString().slice(0, 5)}
+                                     </span>
                                    </div>
-                                   <span className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1 mt-1">
-                                     <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span>
-                                     Pedido às {new Date(p.data).toLocaleTimeString().slice(0, 5)}
-                                   </span>
-                                 </div>
-                                 <div className="text-right">
-                                   <span className="block font-extrabold text-lg text-emerald-600">
-                                     R$ {p.valorTotal.toFixed(2)}
-                                   </span>
-                                 </div>
-                               </div>
-                               
-                               <div className="bg-brand-50/50 p-4 rounded-xl mb-4 border border-brand-100/50">
-                                 {p.itens.map((i, idx) => (
-                                   <div key={idx} className="flex justify-between border-b border-gray-200/50 last:border-0 pb-2 last:pb-0 mb-2 last:mb-0">
-                                     <span className="text-gray-800 font-bold text-lg">{i.quantidade}x <span className="font-medium text-gray-600 text-base">{i.nome}</span></span>
+                                   <div className="text-right">
+                                     <span className="block font-extrabold text-lg text-emerald-600">
+                                       R$ {p.valorTotal.toFixed(2)}
+                                     </span>
                                    </div>
-                                 ))}
-                               </div>
+                                 </div>
+                                 
+                                 <div className="bg-brand-50/50 p-4 rounded-xl mb-4 border border-brand-100/50">
+                                   {p.itens.map((i, idx) => (
+                                     <div key={idx} className="flex justify-between border-b border-gray-200/50 last:border-0 pb-2 last:pb-0 mb-2 last:mb-0">
+                                       <span className="text-gray-800 font-bold text-lg">{i.quantidade}x <span className="font-medium text-gray-600 text-base">{i.nome}</span></span>
+                                     </div>
+                                   ))}
+                                 </div>
 
-                               <div className="flex gap-3 pt-2">
-                                 <GlassButton variant="primary" onClick={() => handleStatus(p.id, StatusPedido.CONCLUIDO)} disabled={loadingId === p.id} className="py-3 text-sm flex-1 bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20">
-                                   {loadingId === p.id ? '...' : '✅ Entregar'}
-                                 </GlassButton>
-                                 <GlassButton variant="secondary" onClick={() => handleStatus(p.id, StatusPedido.CANCELADO)} disabled={loadingId === p.id} className="py-3 text-sm text-red-600 border-red-100 hover:bg-red-50 flex-1">
-                                   {loadingId === p.id ? '...' : 'Cancelar'}
-                                 </GlassButton>
-                               </div>
-                             </GlassCard>
-                           ))}
+                                 <div className="flex gap-3 pt-2">
+                                   <GlassButton variant="primary" onClick={() => handleStatus(p.id, StatusPedido.CONCLUIDO)} disabled={loadingId === p.id} className="py-3 text-sm flex-1 bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20">
+                                     {loadingId === p.id ? '...' : '✅ Entregar'}
+                                   </GlassButton>
+                                   <GlassButton variant="secondary" onClick={() => handleStatus(p.id, StatusPedido.CANCELADO)} disabled={loadingId === p.id} className="py-3 text-sm text-red-600 border-red-100 hover:bg-red-50 flex-1">
+                                     {loadingId === p.id ? '...' : 'Cancelar'}
+                                   </GlassButton>
+                                 </div>
+                               </GlassCard>
+                             );
+                           })}
                          </div>
                        </div>
                      );
@@ -520,7 +984,9 @@ export const CantinaPage: React.FC = () => {
             </div>
           </div>
         </>
-      ) : (
+      )}
+
+      {tab === 'RELATORIO' && (
         // === VIEW: RELATÓRIO GERAL ===
         <div className="animate-fade-in relative">
           
@@ -578,13 +1044,20 @@ export const CantinaPage: React.FC = () => {
                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 animate-fade-in">
                    <div className="p-2 space-y-1">
                       <button onClick={handleExportXLSX} className="w-full text-left px-4 py-3 hover:bg-green-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
-                         <span className="text-green-600 text-lg">📊</span> Excel (Resumo)
+                         <span className="text-green-600 text-lg">📊</span> Excel (Painel Atual)
                       </button>
-                      <button onClick={handleExportPDF} className="w-full text-left px-4 py-3 hover:bg-red-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
-                         <span className="text-red-500 text-lg">📄</span> PDF (Resumo)
+                      <button onClick={handleExportSeparatedXLSX} className="w-full text-left px-4 py-3 hover:bg-green-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
+                         <span className="text-green-800 text-lg">📑</span> Excel (Separado)
+                      </button>
+                      <button onClick={handleExportUnifiedPDF} className="w-full text-left px-4 py-3 hover:bg-red-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
+                         <span className="text-red-700 text-lg">📄</span> PDF (Relatório Completo)
                       </button>
                       <button onClick={handleExportDOCX} className="w-full text-left px-4 py-3 hover:bg-blue-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
                          <span className="text-blue-600 text-lg">📝</span> Word (Resumo)
+                      </button>
+                      <div className="h-px bg-gray-100 my-1"></div>
+                      <button onClick={() => { setIsExportMenuOpen(false); setIsDailyReportModalOpen(true); }} className="w-full text-left px-4 py-3 hover:bg-orange-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
+                         <span className="text-orange-500 text-lg">📅</span> Relatório Diário
                       </button>
                       <div className="h-px bg-gray-100 my-1"></div>
                       <button onClick={handleExportAudit} className="w-full text-left px-4 py-3 hover:bg-purple-50 text-gray-700 rounded-lg font-medium flex items-center gap-3">
@@ -599,12 +1072,56 @@ export const CantinaPage: React.FC = () => {
           {/* Overlay para fechar dropdown */}
           {isExportMenuOpen && <div className="fixed inset-0 z-40" onClick={() => setIsExportMenuOpen(false)}></div>}
 
+          {/* Modal de Relatório Diário */}
+          {isDailyReportModalOpen && createPortal(
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-fade-in">
+              <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+                <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                  <h3 className="text-xl font-bold text-gray-900">Relatório Diário</h3>
+                  <button onClick={() => setIsDailyReportModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Selecione o Dia</label>
+                    <input 
+                      type="date" 
+                      value={dailyReportDate}
+                      onChange={(e) => setDailyReportDate(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-xl focus:ring-brand-500 focus:border-brand-500 outline-none"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-4">
+                    <button 
+                      onClick={() => handleExportDailyReport('XLSX')}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-green-600/20 transition-all"
+                    >
+                      Baixar Excel
+                    </button>
+                    <button 
+                      onClick={() => handleExportDailyReport('PDF')}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-red-600/20 transition-all"
+                    >
+                      Baixar PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
           {loadingRelatorio && <div className="p-12 text-center text-gray-400 font-bold">Carregando relatório...</div>}
 
           {!loadingRelatorio && orderedGroups.map(turma => {
             const cadetesTurma = groupedRelatorio[turma];
             if (cadetesTurma.length === 0) return null;
-            const totalTurma = cadetesTurma.reduce((acc, c) => acc + c.totalGasto, 0);
+            
+            const totalTurma = cadetesTurma.reduce((acc, c) => {
+              const valor = painel === 'CANTINA' ? (c.totalCantina || 0) : (c.totalCidade || 0);
+              return acc + valor;
+            }, 0);
 
             return (
               <div key={turma} className="mb-8">
@@ -624,24 +1141,27 @@ export const CantinaPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {cadetesTurma.map(r => (
-                          <tr 
-                            key={r.id} 
-                            onClick={() => openCadetDetails(r)}
-                            className="hover:bg-brand-50 transition-colors text-sm cursor-pointer group"
-                          >
-                            <td className="p-5 font-mono text-brand-600 font-bold">{r.numero}</td>
-                            <td className="p-5 font-bold text-gray-800 flex items-center gap-2">
-                              {r.guerra}
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-300 group-hover:text-brand-50 opacity-0 group-hover:opacity-100 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                              </svg>
-                            </td>
-                            <td className="p-5 text-center text-gray-600 font-medium">{r.qtdPedidos}</td>
-                            <td className="p-5 text-right font-mono text-gray-900 font-bold text-base">R$ {r.totalGasto.toFixed(2)}</td>
-                          </tr>
-                        ))}
+                        {cadetesTurma.map(r => {
+                          const valor = painel === 'CANTINA' ? (r.totalCantina || 0) : (r.totalCidade || 0);
+                          return (
+                            <tr 
+                              key={r.id} 
+                              onClick={() => openCadetDetails(r)}
+                              className="hover:bg-brand-50 transition-colors text-sm cursor-pointer group"
+                            >
+                              <td className="p-5 font-mono text-brand-600 font-bold">{r.numero}</td>
+                              <td className="p-5 font-bold text-gray-800 flex items-center gap-2">
+                                {r.guerra}
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-300 group-hover:text-brand-50 opacity-0 group-hover:opacity-100 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                              </td>
+                              <td className="p-5 text-center text-gray-600 font-medium">{r.qtdPedidos}</td>
+                              <td className="p-5 text-right font-mono text-gray-900 font-bold text-base">R$ {valor.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -652,10 +1172,175 @@ export const CantinaPage: React.FC = () => {
         </div>
       )}
 
+      {tab === 'SALGADADAS' && (
+        <div className="space-y-6 animate-fade-in pb-20">
+          <div className="flex justify-between items-center px-2">
+            <h2 className="text-xl font-bold text-gray-800">Eventos de Salgadada</h2>
+            <button 
+              onClick={() => {
+                setLoadingSalgadadas(true);
+                loginAPI.getEventosSalgadada().then(data => {
+                  setEventosSalgadada(data);
+                  setLoadingSalgadadas(false);
+                });
+              }}
+              className="text-sm text-brand-600 hover:text-brand-800 font-bold flex items-center gap-1"
+            >
+              <Icons.Refresh className={`w-4 h-4 ${loadingSalgadadas ? 'animate-spin' : ''}`} />
+              Atualizar
+            </button>
+          </div>
+          
+          {loadingSalgadadas ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="bg-white/50 h-64 rounded-2xl animate-pulse border border-gray-100"></div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {orderedGroups.map(turma => {
+                // Filtra eventos por turma do responsável
+                const eventosTurma = eventosSalgadada.filter(evento => {
+                   const esquadraoResp = getEsquadrao(evento.responsavelNumero || '');
+                   // Se não tiver número, cai em 'Outros'. Se tiver, compara com a turma atual.
+                   if (!esquadraoResp) return turma === 'Outros';
+                   // getEsquadrao retorna "Xº Esquadrão". turma é "Xº Ano".
+                   // Vamos normalizar para comparar apenas o número.
+                   const numEsquadrao = esquadraoResp.charAt(0);
+                   const numTurma = turma.charAt(0);
+                   return numEsquadrao === numTurma;
+                });
+
+                if (eventosTurma.length === 0) return null;
+
+                return (
+                  <div key={turma}>
+                    <h3 className="text-gray-500 font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-brand-500"></span>
+                      {turma} ({eventosTurma.length})
+                    </h3>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
+                      {eventosTurma.map(evento => {
+                        const esquadraoResp = getEsquadrao(evento.responsavelNumero || '');
+                        return (
+                          <GlassCard key={evento.id} className="p-6 border-l-[6px] border-l-brand-500 shadow-sm hover:shadow-md transition-all">
+                            <div className="flex justify-between items-start mb-4">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-extrabold text-xl text-gray-900">{evento.nome}</h3>
+                                  <span className="bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded font-bold uppercase">
+                                    {esquadraoResp || turma}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col mt-1">
+                                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                    Resp: {evento.responsavelNome}
+                                  </span>
+                                  <span className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1 mt-0.5">
+                                    <Icons.Clock className="w-3 h-3" />
+                                    {new Date(evento.data).toLocaleDateString()} • {new Date(evento.data).toLocaleTimeString().slice(0,5)}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <span className="block font-extrabold text-lg text-brand-600">
+                                  R$ {evento.valorTotal.toFixed(2)}
+                                </span>
+                                <span className="text-xs text-gray-500 font-medium bg-brand-50 px-2 py-1 rounded-full inline-block mt-1">
+                                  {evento.participantesIds.length} Participantes
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="bg-brand-50/50 p-4 rounded-xl mb-4 border border-brand-100/50">
+                              <p className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                                <Icons.ShoppingBag className="w-3 h-3" /> Itens do Evento
+                              </p>
+                              <div className="space-y-1 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                                {evento.itens.map((item: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between text-sm text-gray-700 border-b border-gray-100 last:border-0 pb-1 last:pb-0">
+                                    <span className="font-medium">{item.quantidade}x {item.nome}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {evento.observacoes && (
+                              <div className="text-xs text-gray-600 italic bg-yellow-50 p-3 rounded-lg border border-yellow-100 flex gap-2 items-start mb-4">
+                                <span className="text-yellow-500 mt-0.5">⚠️</span>
+                                <span>{evento.observacoes}</span>
+                              </div>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                              {evento.status !== StatusPedido.CONCLUIDO && evento.status !== StatusPedido.CANCELADO ? (
+                                <>
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      console.log('CLICK ENTREGAR DETECTADO');
+                                      handleStatusSalgadada(evento.id, StatusPedido.CONCLUIDO);
+                                    }}
+                                    style={{ position: 'relative', zIndex: 50, cursor: 'pointer' }}
+                                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-500/20 text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
+                                  >
+                                    <Icons.Check className="w-4 h-4" /> Entregar
+                                  </button>
+                                  
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      console.log('CLICK CANCELAR DETECTADO');
+                                      handleStatusSalgadada(evento.id, StatusPedido.CANCELADO);
+                                    }}
+                                    style={{ position: 'relative', zIndex: 50, cursor: 'pointer' }}
+                                    className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-lg shadow-red-600/30 border border-transparent text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
+                                  >
+                                    <Icons.X className="w-4 h-4" /> Cancelar
+                                  </button>
+                                </>
+                              ) : (
+                                <div className={`w-full text-center p-2 rounded-lg font-bold border flex items-center justify-center gap-2 ${
+                                  evento.status === StatusPedido.CONCLUIDO 
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                                    : 'bg-red-50 text-red-700 border-red-100'
+                                }`}>
+                                  {evento.status === StatusPedido.CONCLUIDO ? (
+                                    <><span>🎉</span> Entregue / Concluído</>
+                                  ) : (
+                                    <><span>🚫</span> Cancelado</>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </GlassCard>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {eventosSalgadada.length === 0 && (
+                 <div className="text-center py-16 bg-white/50 rounded-3xl border border-dashed border-gray-200">
+                   <div className="text-5xl mb-4">🎉</div>
+                   <p className="text-gray-400 font-bold">Nenhum evento de salgadada ativo.</p>
+                 </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* --- MODAL DE DETALHES --- */}
-      {selectedCadet && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-fade-in" onClick={closeDetails}>
-          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      {selectedCadet && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-fade-in" onClick={closeDetails}>
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col relative" onClick={e => e.stopPropagation()}>
             <GlassCard className="flex flex-col h-full p-0 overflow-hidden shadow-2xl">
               
               {/* Header do Modal */}
@@ -714,7 +1399,8 @@ export const CantinaPage: React.FC = () => {
               </div>
             </GlassCard>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

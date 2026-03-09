@@ -1,14 +1,16 @@
 import React from 'react';
 
+// --- Glass Card ---
+// Fundo branco translúcido com desfoque (blur) e borda sutil
 export const GlassCard: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
   <div className={`bg-white/70 backdrop-blur-xl border border-white/50 shadow-glass rounded-3xl p-6 ${className}`}>
     {children}
   </div>
 );
 
+// --- Glass Input ---
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
-  
 }
 export const GlassInput: React.FC<InputProps> = ({ label, className = '', ...props }) => (
   <div className="mb-4 w-full">
@@ -20,6 +22,7 @@ export const GlassInput: React.FC<InputProps> = ({ label, className = '', ...pro
   </div>
 );
 
+// --- Glass Button ---
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
 }
@@ -27,7 +30,9 @@ export const GlassButton: React.FC<ButtonProps> = ({ children, variant = 'primar
   const baseStyle = "w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-lg";
   
   const variants = {
+    // Primary usa cor sólida para destaque máximo
     primary: "bg-brand-600 hover:bg-brand-500 text-white shadow-brand-500/30 border border-transparent",
+    // Secondary usa efeito glass
     secondary: "bg-white/60 hover:bg-white/80 backdrop-blur-md text-gray-800 border border-white/60 shadow-glass",
     danger: "bg-red-500 hover:bg-red-600 text-white shadow-red-500/30",
     ghost: "bg-transparent hover:bg-black/5 text-gray-600 hover:text-gray-900 shadow-none"
@@ -40,6 +45,7 @@ export const GlassButton: React.FC<ButtonProps> = ({ children, variant = 'primar
   );
 };
 
+// --- Badge ---
 export const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   let colorClass = 'bg-gray-100/80 text-gray-600 border-gray-200';
   if (status === 'CONCLUIDO') colorClass = 'bg-emerald-100/80 text-emerald-700 border-emerald-200/50';
@@ -53,6 +59,7 @@ export const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   );
 };
 
+// --- Stat Card ---
 export const StatCard: React.FC<{ title: string; value: string | number; icon?: React.ReactNode; color?: string }> = ({ title, value, icon, color = "text-gray-900" }) => (
   <GlassCard className="flex flex-col items-center justify-center p-6 border-b-4 border-brand-500/50">
     <span className="text-gray-400 text-[10px] uppercase font-bold tracking-widest mb-2">{title}</span>
