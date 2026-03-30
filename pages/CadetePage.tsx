@@ -469,7 +469,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
 
         <button
           onClick={() => setTab('SALGADADA')}
-          className={`p-4 hidden rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'SALGADADA' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'SALGADADA' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
         >
           <Icons.Plus className="w-6 h-6" />
           <span className="text-[10px] font-bold uppercase tracking-wide">Fazer pedido de salgadada</span>
