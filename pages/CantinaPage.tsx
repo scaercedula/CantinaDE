@@ -86,25 +86,33 @@ export const CantinaPage: React.FC = () => {
     return { startDate, endDate };
   }, [refMonth]);
 
-  // Carrega dados iniciais da fila e usuários
+  // Carrega dados iniciais globais
   useEffect(() => {
     // Carrega usuários para uso no rateio de salgadadas
     loginAPI.getUsuariosParaSalgadada().then(setUsuarios);
 
-    // Carrega a lista de usuários base (sem filtro) apenas para uso na Fila (mapeamento)
-    // Para o relatório oficial, o useEffect abaixo cuidará disso
+    // Carrega salgadadas globalmente para a notificação (badge) poder funcionar em qualquer aba
+    const loadSalgadadasGlobally = async () => {
+      try {
+        const data = await loginAPI.getEventosSalgadada();
+        setEventosSalgadada(data);
+      } catch (e) {
+        console.error("Erro ao carregar salgadadas globalmente", e);
+      }
+    };
+
+    loadSalgadadasGlobally();
+    const interval = setInterval(loadSalgadadasGlobally, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Atualiza Fila
+  useEffect(() => {
     if (tab === 'FILA') {
         loginAPI.getRelatorioFinanceiro().then(setRelatorio);
         loadDataFila();
         const interval = setInterval(loadDataFila, 5000);
         return () => clearInterval(interval);
-    }
-    if (tab === 'SALGADADAS') {
-      setLoadingSalgadadas(true);
-      loginAPI.getEventosSalgadada().then(data => {
-        setEventosSalgadada(data);
-        setLoadingSalgadadas(false);
-      });
     }
   }, [tab, painel]);
 
@@ -807,6 +815,8 @@ export const CantinaPage: React.FC = () => {
     setIsExportMenuOpen(false);
   };
 
+  const qtdSalgadadasPendentes = eventosSalgadada.filter(e => e.status === StatusPedido.PENDENTE).length;
+
   // --- Render ---
   return (
     <div className="space-y-8 relative">
@@ -851,9 +861,14 @@ export const CantinaPage: React.FC = () => {
           {painel === 'CANTINA' && (
             <button 
               onClick={() => setTab('SALGADADAS')}
-              className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'SALGADADAS' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+              className={`relative flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'SALGADADAS' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
             >
               Salgadadas
+              {qtdSalgadadasPendentes > 0 && (
+                <span className="absolute top-1 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
+                  {qtdSalgadadasPendentes}
+                </span>
+              )}
             </button>
           )}
         </div>
