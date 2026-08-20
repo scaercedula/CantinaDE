@@ -603,14 +603,19 @@ class BackendService {
   }
 
   private mapUser(record: any): Usuario {
+    const rawPerfil = record.perfil ? String(record.perfil).toUpperCase() : 'CADETE';
+    let perfil: PerfilUsuario = PerfilUsuario.CADETE;
+    if (rawPerfil === 'CANTINA') perfil = PerfilUsuario.CANTINA;
+    else if (rawPerfil === 'DIRETORIA') perfil = PerfilUsuario.DIRETORIA;
+
     return {
       id: record.id,
       email: record.email,
       nomeCompleto: record.nomeCompleto || record.name || 'Sem Nome', 
       nomeDeGuerra: record.nomeDeGuerra || record.name?.split(' ')[0] || 'Cadete',
-      numero: record.numero || '',
+      numero: record.numero ? String(record.numero).trim() : '',
       esquadrao: record.esquadrao || '',
-      perfil: record.perfil as PerfilUsuario || PerfilUsuario.CADETE,
+      perfil: perfil,
       token: this.pb.authStore.token
     };
   }
