@@ -6,6 +6,8 @@ import { AuthPage } from './pages/AuthPage';
 import { CadetePage } from './pages/CadetePage';
 import { CantinaPage } from './pages/CantinaPage';
 import { DiretoriaPage } from './pages/DiretoriaPage';
+import { ChatToastNotification } from './components/ChatToastNotification';
+
 
 const App: React.FC = () => {
   const [user, setUser] = useState<Usuario | null>(null);
@@ -73,6 +75,9 @@ const App: React.FC = () => {
         {user.perfil === PerfilUsuario.CANTINA && <CantinaPage />}
         {user.perfil === PerfilUsuario.DIRETORIA && <DiretoriaPage />}
       </main>
+
+      {/* Notificações flutuantes em tempo real do Chat */}
+      <ChatToastNotification usuarioAtual={user} />
     </div>
   );
 };

@@ -8,6 +8,11 @@ import { getEsquadrao } from '../utils';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { ChatCantinaInbox } from '../components/ChatCantinaInbox';
+import { chatService } from '../services/chatService';
+import { WhatsNewCard } from '../components/WhatsNewCard';
+
+
 
 // Tipagem para o relatório financeiro
 interface RelatorioCadete {
@@ -29,7 +34,20 @@ const MESES = [
 
 export const CantinaPage: React.FC = () => {
   const [painel, setPainel] = useState<'CANTINA' | 'CIDADE'>('CANTINA');
-  const [tab, setTab] = useState<'FILA' | 'RELATORIO' | 'SALGADADAS'>('FILA');
+  const [tab, setTab] = useState<'FILA' | 'RELATORIO' | 'SALGADADAS' | 'CHAT'>('FILA');
+  const [naoLidasChat, setNaoLidasChat] = useState(0);
+
+  // Monitora mensagens não lidas do chat
+  useEffect(() => {
+    const atualizarNaoLidas = async () => {
+      const count = await chatService.getQtdNaoLidasCantina();
+      setNaoLidasChat(count);
+    };
+    atualizarNaoLidas();
+    const unsub = chatService.subscreverMudancaNaoLidas(atualizarNaoLidas);
+    return () => unsub();
+  }, []);
+
   
   // --- Estados da Fila ---
   const [filaSubTab, setFilaSubTab] = useState<'ABERTO' | 'HISTORICO'>('ABERTO');
@@ -845,7 +863,11 @@ export const CantinaPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Card O que há de novo (What's New) */}
+        <WhatsNewCard onOpenChat={() => setTab('CHAT')} />
+
         <div className="flex p-1 bg-white rounded-xl border border-gray-200 shadow-sm w-full md:w-auto overflow-x-auto">
+
           <button 
             onClick={() => setTab('FILA')}
             className={`flex-1 md:w-40 py-2 text-sm font-bold rounded-lg transition-all ${tab === 'FILA' ? (painel === 'CANTINA' ? 'bg-gray-900' : 'bg-blue-900') + ' text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
@@ -871,7 +893,23 @@ export const CantinaPage: React.FC = () => {
               )}
             </button>
           )}
+          <button 
+            onClick={() => {
+              setTab('CHAT');
+              setNaoLidasChat(0);
+            }}
+            className={`relative flex-1 md:w-44 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${tab === 'CHAT' ? (painel === 'CANTINA' ? 'bg-gray-900' : 'bg-blue-900') + ' text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            <Icons.Chat className="w-4 h-4 inline" />
+            Atendimento
+            {naoLidasChat > 0 && (
+              <span className="ml-1 flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
+                {naoLidasChat > 9 ? '9+' : naoLidasChat}
+              </span>
+            )}
+          </button>
         </div>
+
       </div>
 
       {tab === 'FILA' && (
@@ -1349,6 +1387,12 @@ export const CantinaPage: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'CHAT' && (
+        <div className="animate-fade-in">
+          <ChatCantinaInbox cadetesIniciais={usuarios} />
         </div>
       )}
 

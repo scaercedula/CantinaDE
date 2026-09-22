@@ -75,3 +75,49 @@ export interface ApiResponse<T> {
   dados?: T;
   mensagem?: string;
 }
+
+// Interfaces do Chat E2EE
+export interface PedidoVinculadoChat {
+  id: string;
+  data: string;
+  valorTotal: number;
+  itensResumo: string;
+  status: StatusPedido;
+}
+
+export interface MensagemChatCifrada {
+  id?: string;
+  canalId: string; // Formato "chat_{cadeteId}"
+  remetenteId: string;
+  remetenteNome: string;
+  remetentePerfil: PerfilUsuario;
+  destinatarioId: string; // cadeteId ou "cantina"
+  ciphertext: string; // Base64
+  iv: string; // Base64
+  salt: string; // Base64
+  lida: boolean;
+  pedidoVinculado?: PedidoVinculadoChat;
+  created?: string;
+}
+
+export interface MensagemChatDecifrada {
+  id: string;
+  canalId: string;
+  remetenteId: string;
+  remetenteNome: string;
+  remetentePerfil: PerfilUsuario;
+  destinatarioId: string;
+  texto: string;
+  lida: boolean;
+  timestamp: string;
+  isMinha: boolean;
+  pedidoVinculado?: PedidoVinculadoChat;
+}
+
+export interface ConversaPreview {
+  cadete: Usuario;
+  canalId: string;
+  ultimaMensagem?: MensagemChatDecifrada;
+  naoLidas: number;
+  atualizadoEm: string;
+}

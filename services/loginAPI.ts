@@ -14,6 +14,11 @@ class BackendService {
     this.pb.autoCancellation(false);
   }
 
+  getPb(): PocketBase {
+    return this.pb;
+  }
+
+
   async login(email: string, senha: string): Promise<ApiResponse<Usuario>> {
     try {
       const authData = await this.pb.collection('users').authWithPassword(email, senha);

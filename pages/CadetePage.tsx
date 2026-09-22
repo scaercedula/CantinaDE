@@ -5,6 +5,10 @@ import { loginAPI } from '../services/loginAPI';
 import { StatusBadge, GlassCard } from '../components/GlassUI';
 import { getEsquadrao } from '../utils';
 import { Icons } from '../components/Icons';
+import { ChatWidgetCadete } from '../components/ChatWidgetCadete';
+import { WhatsNewCard } from '../components/WhatsNewCard';
+
+
 
 interface CadetePageProps {
   usuario: Usuario;
@@ -440,6 +444,9 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
           )}
         </div>
       </div>
+
+      {/* Card O que há de novo (What's New) */}
+      <WhatsNewCard />
 
       {/* Navigation Tabs - Simplificado (Murphy's Law: Obvious & Simple) */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -1036,6 +1043,9 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
           {historico.map(p => ( ... ))} */}
         </div>
       )}
+
+      {/* Chat em Tempo Real com Criptografia E2EE */}
+      <ChatWidgetCadete usuario={usuario} ultimoPedido={historico[0]} />
     </div>
   );
 };
