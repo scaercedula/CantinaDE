@@ -863,9 +863,6 @@ export const CantinaPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Card O que há de novo (What's New) */}
-        <WhatsNewCard onOpenChat={() => setTab('CHAT')} />
-
         <div className="flex p-1 bg-white rounded-xl border border-gray-200 shadow-sm w-full md:w-auto overflow-x-auto">
 
           <button 
@@ -898,17 +895,22 @@ export const CantinaPage: React.FC = () => {
               setTab('CHAT');
               setNaoLidasChat(0);
             }}
-            className={`relative flex-1 md:w-44 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${tab === 'CHAT' ? (painel === 'CANTINA' ? 'bg-gray-900' : 'bg-blue-900') + ' text-white shadow-md' : 'text-gray-500 hover:text-gray-900'}`}
+            className={`relative flex-1 md:w-44 py-2.5 text-sm font-black rounded-lg transition-all flex items-center justify-center gap-2 ${
+              tab === 'CHAT' 
+                ? (painel === 'CANTINA' ? 'bg-emerald-600' : 'bg-blue-600') + ' text-white shadow-md' 
+                : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+            }`}
           >
-            <Icons.Chat className="w-4 h-4 inline" />
-            Atendimento
+            <span className="text-base">💬</span>
+            <span>Chat</span>
             {naoLidasChat > 0 && (
-              <span className="ml-1 flex h-5 min-w-5 px-1 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm ring-2 ring-white animate-pulse">
+              <span className="ml-1 flex h-5 min-w-5 px-1.5 items-center justify-center rounded-full bg-red-600 text-[10px] font-black text-white shadow-sm ring-2 ring-white animate-bounce">
                 {naoLidasChat > 9 ? '9+' : naoLidasChat}
               </span>
             )}
           </button>
         </div>
+
 
       </div>
 
