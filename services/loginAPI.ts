@@ -2,7 +2,7 @@ import PocketBase from 'pocketbase';
 import { Usuario, Produto, Pedido, PerfilUsuario, StatusPedido, ApiResponse, EventoSalgadada, OrigemPedido } from '../types';
 
 
-const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS; 
+const POCKETBASE_URL = import.meta.env.VITE_LOGINDADOS || 'https://cantinade.pockethost.io'; 
 const GOOGLE_API_KEY = import.meta.env.VITE_API;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 

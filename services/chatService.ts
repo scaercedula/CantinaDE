@@ -1,9 +1,9 @@
 /**
  * Serviço Unificado de Chat em Tempo Real com E2EE e Fallback Inteligente
- * - Conecta ao PocketBase (coleção 'mensagens_chat') com subscrição SSE
- * - Em caso de ausência da coleção ou offline, ativa fallback LocalStorage + BroadcastChannel
- * - Criptografa na saída e descriptografa na entrada (Web Crypto AES-GCM)
+ * - Conecta ao PocketBase (coleção 'mensagens_chat') com subscrição SSE e pooling resiliente
+ * - Criptografa na saída e descriptografa na entrada (Web Crypto AES-GCM 256-bit)
  * - Emite notificações sonoras e de navegador
+ * - Sincronização multi-aba via BroadcastChannel e fallback LocalStorage
  */
 
 import { Usuario, PerfilUsuario, MensagemChatCifrada, MensagemChatDecifrada, ConversaPreview, PedidoVinculadoChat } from '../types';
@@ -18,12 +18,12 @@ type MessageListener = (msg: MensagemChatDecifrada) => void;
 type UnreadChangeListener = () => void;
 
 class ChatService {
-  private pbAvailable: boolean | null = null;
   private broadcastChannel: BroadcastChannel | null = null;
   private canalListeners: Map<string, Set<MessageListener>> = new Map();
   private globalListeners: Set<MessageListener> = new Set();
   private unreadListeners: Set<UnreadChangeListener> = new Set();
   private isSubscribedPb = false;
+  private processedIds: Set<string> = new Set();
 
   constructor() {
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -40,6 +40,11 @@ class ChatService {
         console.warn('BroadcastChannel não pôde ser iniciado:', e);
       }
     }
+
+    // Tenta iniciar a subscrição SSE no PocketBase quando houver autenticação
+    if (typeof window !== 'undefined') {
+      setTimeout(() => this.iniciarInscricaoPocketBase(), 1000);
+    }
   }
 
   /**
@@ -50,58 +55,46 @@ class ChatService {
   }
 
   /**
-   * Verifica se a coleção PocketBase existe e está acessível
-   */
-  private async testarPocketBase(): Promise<boolean> {
-    if (this.pbAvailable !== null) return this.pbAvailable;
-    try {
-      const pb = loginAPI.getPb();
-      // Tenta uma busca limitada para verificar se a coleção mensagens_chat existe
-      await pb.collection('mensagens_chat').getList(1, 1);
-      this.pbAvailable = true;
-      this.iniciarInscricaoPocketBase();
-      return true;
-    } catch (err: any) {
-      // 404 significa que a coleção não foi criada no PocketBase
-      if (err?.status === 404 || err?.status === 0 || err?.name === 'ClientResponseError') {
-        console.info('ℹ️ Coleção mensagens_chat não encontrada no PocketBase. Ativando modo local em tempo real (BroadcastChannel).');
-        this.pbAvailable = false;
-        return false;
-      }
-      this.pbAvailable = false;
-      return false;
-    }
-  }
-
-  /**
    * Inicia a subscrição SSE do PocketBase para tempo real
    */
-  private async iniciarInscricaoPocketBase() {
-    if (this.isSubscribedPb) return;
+  async iniciarInscricaoPocketBase() {
     try {
       const pb = loginAPI.getPb();
+      if (!pb.authStore.isValid) {
+        return;
+      }
+      if (this.isSubscribedPb) {
+        return;
+      }
+
       await pb.collection('mensagens_chat').subscribe('*', async (e) => {
         if (e.action === 'create' || e.action === 'update') {
+          const rec = e.record;
+          if (e.action === 'create' && this.processedIds.has(rec.id)) {
+            return;
+          }
+          this.processedIds.add(rec.id);
+
           const rawRecord: MensagemChatCifrada = {
-            id: e.record.id,
-            canalId: e.record.canalId,
-            remetenteId: e.record.remetenteId,
-            remetenteNome: e.record.remetenteNome,
-            remetentePerfil: e.record.remetentePerfil,
-            destinatarioId: e.record.destinatarioId,
-            ciphertext: e.record.ciphertext,
-            iv: e.record.iv,
-            salt: e.record.salt,
-            lida: !!e.record.lida,
-            pedidoVinculado: e.record.pedidoVinculado,
-            created: e.record.created
+            id: rec.id,
+            canalId: rec.canalId,
+            remetenteId: rec.remetenteId,
+            remetenteNome: rec.remetenteNome,
+            remetentePerfil: rec.remetentePerfil,
+            destinatarioId: rec.destinatarioId,
+            ciphertext: rec.ciphertext,
+            iv: rec.iv,
+            salt: rec.salt,
+            lida: !!rec.lida,
+            pedidoVinculado: rec.pedidoVinculado || undefined,
+            created: rec.created
           };
           await this.processarMensagemRecebida(rawRecord);
         }
       });
       this.isSubscribedPb = true;
     } catch (err) {
-      console.warn('Erro ao subscrever ao PocketBase Realtime:', err);
+      console.warn('PocketBase SSE subscription retry:', err);
     }
   }
 
@@ -110,7 +103,7 @@ class ChatService {
    */
   private async processarMensagemRecebida(cifrada: MensagemChatCifrada) {
     const usuarioAtual = loginAPI.getUsuarioAtual();
-    const decifrada = await this.decifrarMensagem(cifrada, usuarioAtual?.id);
+    const decifrada = await this.decifrarMensagem(cifrada, usuarioAtual?.id, usuarioAtual?.perfil);
 
     // Notifica canal específico
     const canalSet = this.canalListeners.get(cifrada.canalId);
@@ -124,22 +117,40 @@ class ChatService {
     // Notifica contadores de não lidas
     this.notificarMudancaNaoLidas();
 
-    // Toca som e exibe notificação caso o usuário atual seja o destinatário e não o remetente
-    if (usuarioAtual && cifrada.remetenteId !== usuarioAtual.id) {
-      playMessageSound();
-      showSystemNotification(
-        `Mensagem de ${decifrada.remetenteNome}`,
-        decifrada.texto.slice(0, 80)
-      );
+    // Toca som e exibe notificação caso o usuário atual seja o destinatário
+    if (usuarioAtual) {
+      const souDestinatario = usuarioAtual.perfil === PerfilUsuario.CANTINA
+        ? cifrada.destinatarioId === 'cantina'
+        : cifrada.destinatarioId === usuarioAtual.id;
+
+      if (souDestinatario && cifrada.remetenteId !== usuarioAtual.id) {
+        playMessageSound();
+        showSystemNotification(
+          `Mensagem de ${decifrada.remetenteNome}`,
+          decifrada.texto.slice(0, 80)
+        );
+      }
     }
   }
 
   /**
    * Decifra uma mensagem usando o Web Crypto API
    */
-  async decifrarMensagem(cifrada: MensagemChatCifrada, currentUserId?: string): Promise<MensagemChatDecifrada> {
+  async decifrarMensagem(
+    cifrada: MensagemChatCifrada, 
+    currentUserId?: string, 
+    currentUserPerfil?: PerfilUsuario | string
+  ): Promise<MensagemChatDecifrada> {
     const texto = await decryptPayload(cifrada.ciphertext, cifrada.iv, cifrada.salt, cifrada.canalId);
-    const isMinha = !!currentUserId && cifrada.remetenteId === currentUserId;
+    
+    let isMinha = false;
+    if (currentUserPerfil === PerfilUsuario.CANTINA) {
+      isMinha = cifrada.remetentePerfil === PerfilUsuario.CANTINA || cifrada.remetenteId === 'cantina' || cifrada.remetenteId === currentUserId;
+    } else if (currentUserPerfil === PerfilUsuario.CADETE) {
+      isMinha = cifrada.remetentePerfil === PerfilUsuario.CADETE && (cifrada.remetenteId === currentUserId || !currentUserId);
+    } else {
+      isMinha = !!currentUserId && cifrada.remetenteId === currentUserId;
+    }
 
     return {
       id: cifrada.id || `local_${Date.now()}_${Math.random()}`,
@@ -216,17 +227,17 @@ class ChatService {
       iv,
       salt,
       lida: false,
-      pedidoVinculado,
+      pedidoVinculado: pedidoVinculado || undefined,
       created: new Date().toISOString()
     };
 
     let savedMsg: MensagemChatCifrada = payloadCifrado;
 
-    // 2. Tenta enviar para o PocketBase se disponível
-    const pbOk = await this.testarPocketBase();
-    if (pbOk) {
+    // 2. Tenta enviar para o PocketBase
+    const pb = loginAPI.getPb();
+    if (pb.authStore.isValid) {
+      this.iniciarInscricaoPocketBase();
       try {
-        const pb = loginAPI.getPb();
         const record = await pb.collection('mensagens_chat').create({
           canalId: payloadCifrado.canalId,
           remetenteId: payloadCifrado.remetenteId,
@@ -237,13 +248,14 @@ class ChatService {
           iv: payloadCifrado.iv,
           salt: payloadCifrado.salt,
           lida: false,
-          pedidoVinculado: payloadCifrado.pedidoVinculado
+          pedidoVinculado: payloadCifrado.pedidoVinculado || null
         });
         savedMsg = {
           ...payloadCifrado,
           id: record.id,
           created: record.created
         };
+        this.processedIds.add(record.id);
       } catch (e) {
         console.warn('Erro ao salvar no PocketBase, usando fallback local:', e);
         savedMsg = this.saveLocalMessage(payloadCifrado);
@@ -252,7 +264,7 @@ class ChatService {
       savedMsg = this.saveLocalMessage(payloadCifrado);
     }
 
-    // 3. Sincroniza via BroadcastChannel para outras abas
+    // 3. Sincroniza via BroadcastChannel para outras abas locais
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage({
         type: 'NOVA_MENSAGEM',
@@ -260,8 +272,8 @@ class ChatService {
       });
     }
 
-    // 4. Notifica listeners locais na aba atual
-    const decifrada = await this.decifrarMensagem(savedMsg, remetente.id);
+    // 4. Notifica listeners na aba atual
+    const decifrada = await this.decifrarMensagem(savedMsg, remetente.id, remetente.perfil);
     const canalSet = this.canalListeners.get(canalId);
     if (canalSet) {
       canalSet.forEach(cb => cb(decifrada));
@@ -278,11 +290,11 @@ class ChatService {
   async buscarMensagens(cadeteId: string, usuarioAtual?: Usuario): Promise<MensagemChatDecifrada[]> {
     const canalId = this.getCanalId(cadeteId);
     let mensagensCifradas: MensagemChatCifrada[] = [];
+    const pb = loginAPI.getPb();
 
-    const pbOk = await this.testarPocketBase();
-    if (pbOk) {
+    if (pb.authStore.isValid) {
+      this.iniciarInscricaoPocketBase();
       try {
-        const pb = loginAPI.getPb();
         const records = await pb.collection('mensagens_chat').getFullList({
           filter: `canalId = "${canalId}"`,
           sort: 'created'
@@ -298,7 +310,7 @@ class ChatService {
           iv: r.iv,
           salt: r.salt,
           lida: !!r.lida,
-          pedidoVinculado: r.pedidoVinculado,
+          pedidoVinculado: r.pedidoVinculado || undefined,
           created: r.created
         }));
       } catch (err) {
@@ -309,9 +321,17 @@ class ChatService {
       mensagensCifradas = this.getLocalMessages().filter(m => m.canalId === canalId);
     }
 
+    // Mescla com locais caso alguma mensagem offline ainda não esteja sincronizada
+    const local = this.getLocalMessages().filter(m => m.canalId === canalId);
+    for (const loc of local) {
+      if (loc.id && !mensagensCifradas.some(m => m.id === loc.id)) {
+        mensagensCifradas.push(loc);
+      }
+    }
+
     // Decifra todas em paralelo
     const decifradas = await Promise.all(
-      mensagensCifradas.map(m => this.decifrarMensagem(m, usuarioAtual?.id))
+      mensagensCifradas.map(m => this.decifrarMensagem(m, usuarioAtual?.id, usuarioAtual?.perfil))
     );
 
     return decifradas.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -323,11 +343,10 @@ class ChatService {
   async marcarComoLidas(cadeteId: string, usuarioAtual: Usuario): Promise<void> {
     const canalId = this.getCanalId(cadeteId);
     const isCadete = usuarioAtual.perfil === PerfilUsuario.CADETE;
-    const pbOk = await this.testarPocketBase();
+    const pb = loginAPI.getPb();
 
-    if (pbOk) {
+    if (pb.authStore.isValid) {
       try {
-        const pb = loginAPI.getPb();
         const destinatarioFiltro = isCadete ? `destinatarioId = "${usuarioAtual.id}"` : `destinatarioId = "cantina"`;
         const unreadRecords = await pb.collection('mensagens_chat').getFullList({
           filter: `canalId = "${canalId}" && ${destinatarioFiltro} && lida = false`
@@ -336,7 +355,7 @@ class ChatService {
           await pb.collection('mensagens_chat').update(rec.id, { lida: true });
         }
       } catch (e) {
-        // Ignora ou fallback
+        // Ignora erros não críticos
       }
     }
 
@@ -353,7 +372,11 @@ class ChatService {
       }
     });
     if (updated) {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(local));
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(local));
+      } catch {
+        // Fallback
+      }
     }
 
     if (this.broadcastChannel) {
@@ -367,10 +390,9 @@ class ChatService {
    */
   async getQtdNaoLidasCadete(cadeteId: string): Promise<number> {
     const canalId = this.getCanalId(cadeteId);
-    const pbOk = await this.testarPocketBase();
-    if (pbOk) {
+    const pb = loginAPI.getPb();
+    if (pb.authStore.isValid) {
       try {
-        const pb = loginAPI.getPb();
         const records = await pb.collection('mensagens_chat').getList(1, 100, {
           filter: `canalId = "${canalId}" && destinatarioId = "${cadeteId}" && lida = false`
         });
@@ -386,10 +408,9 @@ class ChatService {
    * Retorna a contagem total de mensagens não lidas para a Cantina
    */
   async getQtdNaoLidasCantina(): Promise<number> {
-    const pbOk = await this.testarPocketBase();
-    if (pbOk) {
+    const pb = loginAPI.getPb();
+    if (pb.authStore.isValid) {
       try {
-        const pb = loginAPI.getPb();
         const records = await pb.collection('mensagens_chat').getList(1, 200, {
           filter: `destinatarioId = "cantina" && lida = false`
         });
@@ -406,11 +427,11 @@ class ChatService {
    */
   async getConversasCantina(cadetes: Usuario[]): Promise<ConversaPreview[]> {
     let allMessages: MensagemChatCifrada[] = [];
+    const pb = loginAPI.getPb();
 
-    const pbOk = await this.testarPocketBase();
-    if (pbOk) {
+    if (pb.authStore.isValid) {
+      this.iniciarInscricaoPocketBase();
       try {
-        const pb = loginAPI.getPb();
         const records = await pb.collection('mensagens_chat').getFullList({
           sort: '-created'
         });
@@ -425,7 +446,7 @@ class ChatService {
           iv: r.iv,
           salt: r.salt,
           lida: !!r.lida,
-          pedidoVinculado: r.pedidoVinculado,
+          pedidoVinculado: r.pedidoVinculado || undefined,
           created: r.created
         }));
       } catch {
@@ -435,22 +456,48 @@ class ChatService {
       allMessages = this.getLocalMessages();
     }
 
+    // Agrupa mensagens por canalId
+    const messagesByCanal = new Map<string, MensagemChatCifrada[]>();
+    for (const msg of allMessages) {
+      if (!messagesByCanal.has(msg.canalId)) {
+        messagesByCanal.set(msg.canalId, []);
+      }
+      messagesByCanal.get(msg.canalId)!.push(msg);
+    }
+
+    const cadeteMap = new Map<string, Usuario>();
+    cadetes.forEach(c => cadeteMap.set(c.id, c));
+
+    // Descobre cadetes a partir de mensagens existentes
+    messagesByCanal.forEach((msgs, canalId) => {
+      const cadeteId = canalId.replace(/^chat_/, '');
+      if (!cadeteMap.has(cadeteId)) {
+        const cadeteMsg = msgs.find(m => m.remetentePerfil === PerfilUsuario.CADETE);
+        cadeteMap.set(cadeteId, {
+          id: cadeteId,
+          nomeCompleto: cadeteMsg ? cadeteMsg.remetenteNome : `Cadete ${cadeteId.slice(-4)}`,
+          nomeDeGuerra: cadeteMsg ? cadeteMsg.remetenteNome : `Cadete`,
+          numero: '',
+          email: '',
+          perfil: PerfilUsuario.CADETE
+        });
+      }
+    });
+
     const conversas: ConversaPreview[] = [];
 
-    for (const cadete of cadetes) {
-      const canalId = this.getCanalId(cadete.id);
-      const msgsDoCanal = allMessages.filter(m => m.canalId === canalId);
+    for (const [cadeteId, cadete] of cadeteMap.entries()) {
+      const canalId = this.getCanalId(cadeteId);
+      const msgsDoCanal = messagesByCanal.get(canalId) || [];
       const naoLidas = msgsDoCanal.filter(m => m.destinatarioId === 'cantina' && !m.lida).length;
 
       let ultimaMensagem: MensagemChatDecifrada | undefined = undefined;
       let atualizadoEm = '1970-01-01T00:00:00.000Z';
 
       if (msgsDoCanal.length > 0) {
-        // Ordena para pegar a última
-        const sorted = [...msgsDoCanal].sort((a, b) => new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime());
-        const rawUltima = sorted[0];
+        const rawUltima = msgsDoCanal[0];
         atualizadoEm = rawUltima.created || atualizadoEm;
-        ultimaMensagem = await this.decifrarMensagem(rawUltima, 'cantina');
+        ultimaMensagem = await this.decifrarMensagem(rawUltima, 'cantina', PerfilUsuario.CANTINA);
       }
 
       conversas.push({
@@ -462,7 +509,7 @@ class ChatService {
       });
     }
 
-    // Ordena: primeiro com mensagens mais recentes, depois por nome de guerra
+    // Ordena: primeiro conversas ativas com mensagens recentes, depois ordem alfabética
     return conversas.sort((a, b) => {
       const timeA = new Date(a.atualizadoEm).getTime();
       const timeB = new Date(b.atualizadoEm).getTime();

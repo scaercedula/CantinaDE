@@ -39,13 +39,19 @@ export const CantinaPage: React.FC = () => {
 
   // Monitora mensagens não lidas do chat
   useEffect(() => {
+    let cancelado = false;
     const atualizarNaoLidas = async () => {
       const count = await chatService.getQtdNaoLidasCantina();
-      setNaoLidasChat(count);
+      if (!cancelado) setNaoLidasChat(count);
     };
     atualizarNaoLidas();
     const unsub = chatService.subscreverMudancaNaoLidas(atualizarNaoLidas);
-    return () => unsub();
+    const interval = setInterval(atualizarNaoLidas, 4000);
+    return () => {
+      cancelado = true;
+      unsub();
+      clearInterval(interval);
+    };
   }, []);
 
   

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Usuario, Pedido, MensagemChatDecifrada, PedidoVinculadoChat } from '../types';
 import { chatService } from '../services/chatService';
 import { Icons } from './Icons';
@@ -10,6 +11,7 @@ interface ChatWidgetCadeteProps {
 }
 
 export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ultimoPedido }) => {
+  const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [mensagens, setMensagens] = useState<MensagemChatDecifrada[]>([]);
   const [novoTexto, setNovoTexto] = useState('');
@@ -25,18 +27,29 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Carrega contagem inicial de não lidas e escuta atualizações
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Carrega contagem inicial de não lidas e escuta atualizações com polling de garantia
+  useEffect(() => {
+    let cancelado = false;
     const atualizarNaoLidas = async () => {
-      if (!isOpen) {
+      if (!isOpen && !cancelado) {
         const count = await chatService.getQtdNaoLidasCadete(usuario.id);
-        setNaoLidas(count);
+        if (!cancelado) setNaoLidas(count);
       }
     };
 
     atualizarNaoLidas();
     const unsubUnread = chatService.subscreverMudancaNaoLidas(atualizarNaoLidas);
-    return () => unsubUnread();
+    const interval = setInterval(atualizarNaoLidas, 5000);
+
+    return () => {
+      cancelado = true;
+      unsubUnread();
+      clearInterval(interval);
+    };
   }, [usuario.id, isOpen]);
 
   // Permite abrir o chat programaticamente (ex: pelo card de novidades)
@@ -49,18 +62,40 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
     return () => window.removeEventListener('abrir-chat-cadete', handleAbrir);
   }, []);
 
-  // Carrega mensagens e inscreve no canal
+  // Carrega mensagens, inscreve no canal e ativa polling de garantia a cada 3s quando aberto
   useEffect(() => {
     if (!isOpen) return;
 
+    let cancelado = false;
     setCarregando(true);
-    chatService.buscarMensagens(usuario.id, usuario).then(msgs => {
-      setMensagens(msgs);
-      setCarregando(false);
-      chatService.marcarComoLidas(usuario.id, usuario);
-      setNaoLidas(0);
-    });
 
+    const carregar = async (silent = false) => {
+      try {
+        const msgs = await chatService.buscarMensagens(usuario.id, usuario);
+        if (cancelado) return;
+
+        setMensagens(prev => {
+          if (prev.length === msgs.length) {
+            const lastPrev = prev[prev.length - 1];
+            const lastNew = msgs[msgs.length - 1];
+            if (lastPrev?.id === lastNew?.id && lastPrev?.lida === lastNew?.lida) {
+              return prev;
+            }
+          }
+          return msgs;
+        });
+
+        if (!silent) setCarregando(false);
+        chatService.marcarComoLidas(usuario.id, usuario);
+        setNaoLidas(0);
+      } catch (err) {
+        if (!silent) setCarregando(false);
+      }
+    };
+
+    carregar(false);
+
+    // Subscrição em tempo real via SSE / BroadcastChannel
     const unsubCanal = chatService.subscreverCanal(usuario.id, (novaMsg) => {
       setMensagens(prev => {
         if (prev.some(m => m.id === novaMsg.id)) return prev;
@@ -71,7 +106,16 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
       }
     });
 
-    return () => unsubCanal();
+    // Polling de garantia (every 3 seconds) para sincronização contínua
+    const interval = setInterval(() => {
+      carregar(true);
+    }, 3000);
+
+    return () => {
+      cancelado = true;
+      unsubCanal();
+      clearInterval(interval);
+    };
   }, [isOpen, usuario]);
 
   // Auto-scroll ao receber novas mensagens
@@ -107,15 +151,14 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
   const handleAnexarUltimoPedido = () => {
     if (!ultimoPedido) return;
     const resumoItens = ultimoPedido.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
-    const pedidoVinculado: PedidoVinculadoChat = {
+    const pedidoAnexo: PedidoVinculadoChat = {
       id: ultimoPedido.id,
       data: ultimoPedido.data,
       valorTotal: ultimoPedido.valorTotal,
       itensResumo: resumoItens,
       status: ultimoPedido.status
     };
-
-    handleEnviar(undefined, pedidoVinculado);
+    handleEnviar(undefined, pedidoAnexo);
   };
 
   const handleToggleNotificacoes = async () => {
@@ -123,7 +166,7 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
     setNotificacoesAtivas(granted);
   };
 
-  // Filtragem de mensagens pela busca interna
+  // Filtro de pesquisa de mensagens
   const mensagensFiltradas = mensagens.filter(m => {
     if (!buscaTermo.trim()) return true;
     const termo = buscaTermo.toLowerCase();
@@ -132,10 +175,12 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
     return textoMatch || pedidoMatch;
   });
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <>
-      {/* Botão Flutuante (FAB) */}
-      <div className="fixed bottom-6 right-6 z-50">
+      {/* Botão Flutuante (FAB) - 100% fixo no canto inferior direito da janela */}
+      <div className="fixed bottom-6 right-6 z-50 pointer-events-auto">
         <button
           onClick={() => {
             setIsOpen(!isOpen);
@@ -165,7 +210,7 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
         </button>
       </div>
 
-      {/* Janela Modal do Chat */}
+      {/* Janela Modal do Chat - 100% fixa e responsiva */}
       {isOpen && (
         <div className="fixed bottom-24 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[420px] max-h-[640px] h-[82vh] bg-white rounded-3xl shadow-2xl border border-gray-100 flex flex-col overflow-hidden animate-fade-in transition-all">
           {/* Topo / Header */}
@@ -259,18 +304,18 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
                 <span>Carregando mensagens com segurança...</span>
               </div>
             ) : mensagensFiltradas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-400">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
-                  <Icons.Chat className="w-6 h-6" />
+              <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-400 space-y-2">
+                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mb-1">
+                  💬
                 </div>
-                <p className="font-bold text-gray-700 text-sm">Olá, {usuario.nomeDeGuerra}!</p>
-                <p className="text-xs text-gray-500 mt-1 max-w-[240px]">
-                  Envie sua dúvida ou solicitação diretamente para a equipe da Cantina.
+                <p className="font-bold text-gray-700 text-sm">Nenhuma mensagem ainda</p>
+                <p className="text-xs text-gray-500 leading-relaxed max-w-xs">
+                  Envie uma dúvida sobre o cardápio, combine horários da fornada da salgadada ou consulte seu pedido!
                 </p>
               </div>
             ) : (
               mensagensFiltradas.map((msg) => {
-                const isMinha = msg.isMinha || msg.remetenteId === usuario.id;
+                const isMinha = msg.isMinha;
                 const horaFormatada = new Date(msg.timestamp).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit'
@@ -279,21 +324,27 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
                 return (
                   <div
                     key={msg.id}
-                    className={`flex flex-col ${isMinha ? 'items-end' : 'items-start'} transition-all`}
+                    className={`flex flex-col ${isMinha ? 'items-end' : 'items-start'} animate-fade-in`}
                   >
+                    {!isMinha && (
+                      <span className="text-[10px] text-gray-500 font-semibold mb-1 ml-1 flex items-center gap-1">
+                        <span>🥪</span> Cantina da DE
+                      </span>
+                    )}
+
                     <div
-                      className={`max-w-[82%] rounded-2xl p-3 shadow-sm text-sm relative ${
+                      className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-xs text-xs ${
                         isMinha
                           ? 'bg-emerald-600 text-white rounded-br-xs'
-                          : 'bg-white text-gray-800 border border-gray-100 rounded-bl-xs'
+                          : 'bg-white border border-gray-200 text-gray-900 rounded-bl-xs shadow-sm'
                       }`}
                     >
-                      {/* Card de Pedido Vinculado */}
+                      {/* Pedido Vinculado / Anexado */}
                       {msg.pedidoVinculado && (
                         <div
-                          className={`mb-2 p-2.5 rounded-xl border text-xs ${
+                          className={`mb-2 p-2 rounded-xl border text-[11px] ${
                             isMinha
-                              ? 'bg-emerald-700/60 border-emerald-500/50 text-white'
+                              ? 'bg-emerald-700/60 border-emerald-500/60 text-white'
                               : 'bg-gray-50 border-gray-200 text-gray-800'
                           }`}
                         >
@@ -388,6 +439,7 @@ export const ChatWidgetCadete: React.FC<ChatWidgetCadeteProps> = ({ usuario, ult
           </form>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 };

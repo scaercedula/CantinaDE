@@ -88,41 +88,79 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
     });
 
     const unsubUnread = chatService.subscreverMudancaNaoLidas(() => {
-      // Atualiza lista levemente
-      if (cadetesIniciais) {
+      if (cadetesIniciais && cadetesIniciais.length > 0) {
         chatService.getConversasCantina(cadetesIniciais).then(setConversas);
       }
     });
 
+    // Polling contínuo de garantia para manter a lista de conversas e não lidas atualizada
+    const intervalConversas = setInterval(() => {
+      const cadetes = (cadetesIniciais && cadetesIniciais.length > 0) ? cadetesIniciais : [];
+      chatService.getConversasCantina(cadetes).then(novasConversas => {
+        setConversas(prev => {
+          if (prev.length === 0) return novasConversas;
+          // Atualiza apenas se houve alteração de contagem ou última mensagem
+          const mudou = novasConversas.some((nc, idx) => {
+            const pc = prev[idx];
+            return !pc || pc.cadete.id !== nc.cadete.id || pc.naoLidas !== nc.naoLidas || pc.atualizadoEm !== nc.atualizadoEm;
+          });
+          return mudou ? novasConversas : prev;
+        });
+      });
+    }, 4000);
+
     return () => {
       unsubGlobal();
       unsubUnread();
+      clearInterval(intervalConversas);
     };
-  }, [cadeteAtivo]);
+  }, [cadeteAtivo, cadetesIniciais]);
 
-  // Carrega mensagens do cadete ativo
+  // Carrega mensagens do cadete ativo com polling em tempo real
   useEffect(() => {
     if (!cadeteAtivo) return;
 
+    let cancelado = false;
     setCarregandoMensagens(true);
+
     const usuarioAtual = loginAPI.getUsuarioAtual() || {
       id: 'cantina',
       perfil: 'CANTINA',
-      nomeCompleto: 'Cantina',
+      nomeCompleto: 'Cantina da DE',
       nomeDeGuerra: 'Cantina',
-      email: '',
+      email: 'cantinade@gmail.com',
       numero: ''
     } as any;
 
-    chatService.buscarMensagens(cadeteAtivo.id, usuarioAtual).then(msgs => {
-      setMensagens(msgs);
-      setCarregandoMensagens(false);
-      chatService.marcarComoLidas(cadeteAtivo.id, usuarioAtual);
+    const carregarMsgs = async (silent = false) => {
+      try {
+        const msgs = await chatService.buscarMensagens(cadeteAtivo.id, usuarioAtual);
+        if (cancelado) return;
 
-      // Zera contador na lista local
-      setConversas(prev => prev.map(c => c.cadete.id === cadeteAtivo.id ? { ...c, naoLidas: 0 } : c));
-    });
+        setMensagens(prev => {
+          if (prev.length === msgs.length) {
+            const lastPrev = prev[prev.length - 1];
+            const lastNew = msgs[msgs.length - 1];
+            if (lastPrev?.id === lastNew?.id && lastPrev?.lida === lastNew?.lida) {
+              return prev;
+            }
+          }
+          return msgs;
+        });
 
+        if (!silent) setCarregandoMensagens(false);
+        chatService.marcarComoLidas(cadeteAtivo.id, usuarioAtual);
+
+        // Zera contador na lista local
+        setConversas(prev => prev.map(c => c.cadete.id === cadeteAtivo.id ? { ...c, naoLidas: 0 } : c));
+      } catch {
+        if (!silent) setCarregandoMensagens(false);
+      }
+    };
+
+    carregarMsgs(false);
+
+    // Escuta evento em tempo real via SSE / BroadcastChannel
     const unsubCanal = chatService.subscreverCanal(cadeteAtivo.id, (novaMsg) => {
       setMensagens(prev => {
         if (prev.some(m => m.id === novaMsg.id)) return prev;
@@ -132,7 +170,16 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       setConversas(prev => prev.map(c => c.cadete.id === cadeteAtivo.id ? { ...c, naoLidas: 0 } : c));
     });
 
-    return () => unsubCanal();
+    // Polling de garantia (every 3000ms) para receber novas mensagens do cadete sem falha
+    const intervalMsgs = setInterval(() => {
+      carregarMsgs(true);
+    }, 3000);
+
+    return () => {
+      cancelado = true;
+      unsubCanal();
+      clearInterval(intervalMsgs);
+    };
   }, [cadeteAtivo]);
 
   // Auto-scroll
