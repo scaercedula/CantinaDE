@@ -7,6 +7,7 @@ import { getEsquadrao } from '../utils';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { Icons } from '../components/Icons';
 
 interface RelatorioCadete {
   id: string;
@@ -15,6 +16,8 @@ interface RelatorioCadete {
   numero: string;
   totalGasto: number;
   totalCantina: number;
+  totalPedidosCantina?: number;
+  totalSalgadadas?: number;
   totalCidade: number;
   ultimaCompra: string;
   qtdPedidos: number;
@@ -56,6 +59,22 @@ export const DiretoriaPage: React.FC = () => {
   // Relatório Diário
   const [isDailyReportModalOpen, setIsDailyReportModalOpen] = useState(false);
   const [dailyReportDate, setDailyReportDate] = useState(new Date().toISOString().split('T')[0]);
+  const [loadingDailyPreview, setLoadingDailyPreview] = useState(false);
+  const [dailyPreviewData, setDailyPreviewData] = useState<{
+    totalGeral: number;
+    qtdTotal: number;
+    totalPedidos: number;
+    qtdPedidos: number;
+    totalSalgadadas: number;
+    qtdSalgadadas: number;
+  }>({
+    totalGeral: 0,
+    qtdTotal: 0,
+    totalPedidos: 0,
+    qtdPedidos: 0,
+    totalSalgadadas: 0,
+    qtdSalgadadas: 0
+  });
 
   // Cálculo do Período Fiscal
   // Regra: Mês de Referência X = 20 do Mês (X-2) até 19 do Mês (X-1)
@@ -82,6 +101,48 @@ export const DiretoriaPage: React.FC = () => {
     loginAPI.getEventosSalgadada().then(setEventos);
     loginAPI.getCadetes().then(setCadetes);
   }, [fiscalPeriod]);
+
+  // Carrega prévia do Relatório Diário em tempo real ao selecionar data
+  useEffect(() => {
+    if (!isDailyReportModalOpen) return;
+    let cancelado = false;
+    setLoadingDailyPreview(true);
+
+    const calcularPreview = async () => {
+      try {
+        const allPedidos = await loginAPI.getPedidos();
+        if (cancelado) return;
+        const targetDate = new Date(dailyReportDate + 'T12:00:00').toDateString();
+        const pedidosDoDia = allPedidos.filter(p => 
+          new Date(p.data).toDateString() === targetDate && 
+          p.status !== StatusPedido.CANCELADO
+        );
+
+        const pedidosNormais = pedidosDoDia.filter(p => !p.isEventoSalgadada);
+        const salgadadas = pedidosDoDia.filter(p => p.isEventoSalgadada);
+
+        const totalPedidos = pedidosNormais.reduce((acc, p) => acc + p.valorTotal, 0);
+        const totalSalgadadas = salgadadas.reduce((acc, p) => acc + p.valorTotal, 0);
+        const totalGeral = pedidosDoDia.reduce((acc, p) => acc + p.valorTotal, 0);
+
+        setDailyPreviewData({
+          totalGeral,
+          qtdTotal: pedidosDoDia.length,
+          totalPedidos,
+          qtdPedidos: pedidosNormais.length,
+          totalSalgadadas,
+          qtdSalgadadas: salgadadas.length
+        });
+      } catch (err) {
+        console.error("Erro ao calcular preview do relatório diário na diretoria:", err);
+      } finally {
+        if (!cancelado) setLoadingDailyPreview(false);
+      }
+    };
+
+    calcularPreview();
+    return () => { cancelado = true; };
+  }, [isDailyReportModalOpen, dailyReportDate]);
 
   const handleSaveParticipantes = async () => {
     if (!editingEvento) return;
@@ -212,17 +273,19 @@ export const DiretoriaPage: React.FC = () => {
     const dados = orderedKeys.map(turma => {
       if (turma === 'Outros') return null;
       const cadetes = groupedData[turma];
-      const totalCantina = cadetes.reduce((acc, c) => acc + (c.totalCantina || 0), 0);
+      const totalCantina = cadetes.reduce((acc, c) => acc + (c.totalPedidosCantina ?? c.totalCantina ?? 0), 0);
+      const totalSalgadadas = cadetes.reduce((acc, c) => acc + (c.totalSalgadadas ?? 0), 0);
       const totalCidade = cadetes.reduce((acc, c) => acc + (c.totalCidade || 0), 0);
-      const totalGeral = totalCantina + totalCidade;
-      return { turma, totalCantina, totalCidade, totalGeral };
-    }).filter(Boolean) as { turma: string, totalCantina: number, totalCidade: number, totalGeral: number }[];
+      const totalGeral = totalCantina + totalSalgadadas + totalCidade;
+      return { turma, totalCantina, totalSalgadadas, totalCidade, totalGeral };
+    }).filter(Boolean) as { turma: string, totalCantina: number, totalSalgadadas: number, totalCidade: number, totalGeral: number }[];
 
     const acumulado = dados.reduce((acc, r) => ({
         totalCantina: acc.totalCantina + r.totalCantina,
+        totalSalgadadas: acc.totalSalgadadas + r.totalSalgadadas,
         totalCidade: acc.totalCidade + r.totalCidade,
         totalGeral: acc.totalGeral + r.totalGeral
-    }), { totalCantina: 0, totalCidade: 0, totalGeral: 0 });
+    }), { totalCantina: 0, totalSalgadadas: 0, totalCidade: 0, totalGeral: 0 });
 
     return { dados, acumulado };
   }, [groupedData, orderedKeys]);
@@ -239,56 +302,65 @@ export const DiretoriaPage: React.FC = () => {
       ["Relatório Financeiro - Diretoria", `Referência: ${MESES[selectedMonth]}/${currentYear}`],
       ["Período", `${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}`],
       [],
-      ["Número", "Nome de Guerra", "Nome Completo", "Turma", "Quantidade de Pedidos", "Cantina (R$)", "Cidade (R$)", "Total Gasto (R$)"]
+      ["Número", "Nome de Guerra", "Nome Completo", "Turma", "Quantidade de Pedidos", "Cantina (R$)", "Salgadadas (R$)", "Cidade (R$)", "Total Gasto (R$)"]
     ];
 
     let totalGeral = 0;
     let totalGeralCantina = 0;
+    let totalGeralSalgadadas = 0;
     let totalGeralCidade = 0;
 
     Object.keys(groups).forEach(turma => {
       if (groups[turma].length > 0) {
         let totalTurma = 0;
         let totalTurmaCantina = 0;
+        let totalTurmaSalgadadas = 0;
         let totalTurmaCidade = 0;
 
         groups[turma].forEach(r => {
+          const valCantina = r.totalPedidosCantina ?? r.totalCantina ?? 0;
+          const valSalgadadas = r.totalSalgadadas ?? 0;
+          const valCidade = r.totalCidade || 0;
           wsData.push([
             r.numero,
             r.guerra,
             r.nome,
             turma,
             r.qtdPedidos.toString(),
-            (r.totalCantina || 0).toFixed(2),
-            (r.totalCidade || 0).toFixed(2),
+            valCantina.toFixed(2),
+            valSalgadadas.toFixed(2),
+            valCidade.toFixed(2),
             r.totalGasto.toFixed(2)
           ]);
           totalTurma += r.totalGasto;
-          totalTurmaCantina += (r.totalCantina || 0);
-          totalTurmaCidade += (r.totalCidade || 0);
+          totalTurmaCantina += valCantina;
+          totalTurmaSalgadadas += valSalgadadas;
+          totalTurmaCidade += valCidade;
         });
         // Linha de Total da Turma
-        wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurmaCantina.toFixed(2), totalTurmaCidade.toFixed(2), totalTurma.toFixed(2)]);
+        wsData.push(["", "", `TOTAL ${turma.toUpperCase()}`, "", "", totalTurmaCantina.toFixed(2), totalTurmaSalgadadas.toFixed(2), totalTurmaCidade.toFixed(2), totalTurma.toFixed(2)]);
         wsData.push([]); // Espaço
         totalGeral += totalTurma;
         totalGeralCantina += totalTurmaCantina;
+        totalGeralSalgadadas += totalTurmaSalgadadas;
         totalGeralCidade += totalTurmaCidade;
       }
     });
 
-    wsData.push(["", "", "TOTAL GERAL", "", "", totalGeralCantina.toFixed(2), totalGeralCidade.toFixed(2), totalGeral.toFixed(2)]);
+    wsData.push(["", "", "TOTAL GERAL", "", "", totalGeralCantina.toFixed(2), totalGeralSalgadadas.toFixed(2), totalGeralCidade.toFixed(2), totalGeral.toFixed(2)]);
 
     // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
     wsData.push([]);
     wsData.push([]);
     wsData.push(["------------------------------------------------------------"]);
     wsData.push(["RESUMO GERAL POR ESQUADRÃO"]);
-    wsData.push(["Esquadrão", "Total Cantina (R$)", "Total Cidade (R$)", "Total Geral (R$)"]);
+    wsData.push(["Esquadrão", "Total Cantina (R$)", "Total Salgadadas (R$)", "Total Cidade (R$)", "Total Geral (R$)"]);
 
     resumoPorEsquadrao.dados.forEach(r => {
         wsData.push([
             r.turma,
             r.totalCantina.toFixed(2),
+            r.totalSalgadadas.toFixed(2),
             r.totalCidade.toFixed(2),
             r.totalGeral.toFixed(2)
         ]);
@@ -297,6 +369,7 @@ export const DiretoriaPage: React.FC = () => {
     wsData.push([
         "TOTAL ACUMULADO",
         resumoPorEsquadrao.acumulado.totalCantina.toFixed(2),
+        resumoPorEsquadrao.acumulado.totalSalgadadas.toFixed(2),
         resumoPorEsquadrao.acumulado.totalCidade.toFixed(2),
         resumoPorEsquadrao.acumulado.totalGeral.toFixed(2)
     ]);
@@ -320,44 +393,52 @@ export const DiretoriaPage: React.FC = () => {
     const tableRows: any[] = [];
     let totalGeral = 0;
     let totalGeralCantina = 0;
+    let totalGeralSalgadadas = 0;
     let totalGeralCidade = 0;
 
     Object.keys(groups).forEach(turma => {
       if (groups[turma].length > 0) {
         // Cabeçalho da Turma
-        tableRows.push([{ content: turma.toUpperCase(), colSpan: 6, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
+        tableRows.push([{ content: turma.toUpperCase(), colSpan: 7, styles: { fillColor: [220, 220, 220], fontStyle: 'bold' } }]);
 
         let totalTurma = 0;
         let totalTurmaCantina = 0;
+        let totalTurmaSalgadadas = 0;
         let totalTurmaCidade = 0;
 
         groups[turma].forEach(r => {
+          const valCantina = r.totalPedidosCantina ?? r.totalCantina ?? 0;
+          const valSalgadadas = r.totalSalgadadas ?? 0;
+          const valCidade = r.totalCidade || 0;
           tableRows.push([
             r.numero,
             r.guerra,
             r.qtdPedidos,
-            `R$ ${(r.totalCantina || 0).toFixed(2)}`,
-            `R$ ${(r.totalCidade || 0).toFixed(2)}`,
+            `R$ ${valCantina.toFixed(2)}`,
+            `R$ ${valSalgadadas.toFixed(2)}`,
+            `R$ ${valCidade.toFixed(2)}`,
             `R$ ${r.totalGasto.toFixed(2)}`
           ]);
           totalTurma += r.totalGasto;
-          totalTurmaCantina += (r.totalCantina || 0);
-          totalTurmaCidade += (r.totalCidade || 0);
+          totalTurmaCantina += valCantina;
+          totalTurmaSalgadadas += valSalgadadas;
+          totalTurmaCidade += valCidade;
         });
 
         // Total da Turma
-        tableRows.push([{ content: `Total ${turma}: R$ ${totalTurma.toFixed(2)}`, colSpan: 6, styles: { fontStyle: 'bold', halign: 'right' } }]);
+        tableRows.push([{ content: `Total ${turma}: R$ ${totalTurma.toFixed(2)}`, colSpan: 7, styles: { fontStyle: 'bold', halign: 'right' } }]);
         totalGeral += totalTurma;
         totalGeralCantina += totalTurmaCantina;
+        totalGeralSalgadadas += totalTurmaSalgadadas;
         totalGeralCidade += totalTurmaCidade;
       }
     });
 
     // Total Geral
-    tableRows.push([{ content: `TOTAL GERAL: R$ ${totalGeral.toFixed(2)}`, colSpan: 6, styles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold', halign: 'right' } }]);
+    tableRows.push([{ content: `TOTAL GERAL: R$ ${totalGeral.toFixed(2)}`, colSpan: 7, styles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold', halign: 'right' } }]);
 
     autoTable(doc, {
-      head: [["Número", "Nome de Guerra", "Qtd", "Cantina", "Cidade", "Total"]],
+      head: [["Número", "Nome de Guerra", "Qtd", "Cantina", "Salgadadas", "Cidade", "Total"]],
       body: tableRows,
       startY: 30,
     });
@@ -370,6 +451,7 @@ export const DiretoriaPage: React.FC = () => {
     const summaryRows = resumoPorEsquadrao.dados.map(r => [
         r.turma,
         `R$ ${r.totalCantina.toFixed(2)}`,
+        `R$ ${r.totalSalgadadas.toFixed(2)}`,
         `R$ ${r.totalCidade.toFixed(2)}`,
         `R$ ${r.totalGeral.toFixed(2)}`
     ]);
@@ -377,12 +459,13 @@ export const DiretoriaPage: React.FC = () => {
     summaryRows.push([
         { content: "TOTAL ACUMULADO", styles: { fontStyle: 'bold' } },
         { content: `R$ ${resumoPorEsquadrao.acumulado.totalCantina.toFixed(2)}`, styles: { fontStyle: 'bold' } },
+        { content: `R$ ${resumoPorEsquadrao.acumulado.totalSalgadadas.toFixed(2)}`, styles: { fontStyle: 'bold' } },
         { content: `R$ ${resumoPorEsquadrao.acumulado.totalCidade.toFixed(2)}`, styles: { fontStyle: 'bold' } },
         { content: `R$ ${resumoPorEsquadrao.acumulado.totalGeral.toFixed(2)}`, styles: { fontStyle: 'bold', fillColor: [245, 158, 11], textColor: 255 } }
     ]);
 
     autoTable(doc, {
-      head: [["Esquadrão", "Total Cantina", "Total Cidade", "Total Geral"]],
+      head: [["Esquadrão", "Total Cantina", "Total Salgadadas", "Total Cidade", "Total Geral"]],
       body: summaryRows,
       startY: 30,
       theme: 'grid',
@@ -404,56 +487,65 @@ export const DiretoriaPage: React.FC = () => {
     html += `<p style="font-family: Arial">Período: ${fiscalPeriod.startDate.toLocaleDateString()} a ${fiscalPeriod.endDate.toLocaleDateString()}</p>`;
 
     html += '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px; border: 1px solid #ddd;">';
-    html += '<tr style="background-color: #2c3e50; color: white;"><th>Número</th><th>Nome de Guerra</th><th>Turma</th><th>Cantina (R$)</th><th>Cidade (R$)</th><th>Total (R$)</th></tr>';
+    html += '<tr style="background-color: #2c3e50; color: white;"><th>Número</th><th>Nome de Guerra</th><th>Turma</th><th>Cantina (R$)</th><th>Salgadadas (R$)</th><th>Cidade (R$)</th><th>Total (R$)</th></tr>';
 
     let totalGeral = 0;
     let totalGeralCantina = 0;
+    let totalGeralSalgadadas = 0;
     let totalGeralCidade = 0;
 
     Object.keys(groups).forEach(turma => {
       if (groups[turma].length > 0) {
         let totalTurma = 0;
         let totalTurmaCantina = 0;
+        let totalTurmaSalgadadas = 0;
         let totalTurmaCidade = 0;
 
         // Cabeçalho Turma
-        html += `<tr style="background-color: #eee;"><td colspan="6"><strong>${turma}</strong></td></tr>`;
+        html += `<tr style="background-color: #eee;"><td colspan="7"><strong>${turma}</strong></td></tr>`;
 
         groups[turma].forEach(r => {
+          const valCantina = r.totalPedidosCantina ?? r.totalCantina ?? 0;
+          const valSalgadadas = r.totalSalgadadas ?? 0;
+          const valCidade = r.totalCidade || 0;
           html += `<tr>
             <td>${r.numero}</td>
             <td>${r.guerra}</td>
             <td>${turma}</td>
-            <td style="text-align: right">${(r.totalCantina || 0).toFixed(2)}</td>
-            <td style="text-align: right">${(r.totalCidade || 0).toFixed(2)}</td>
+            <td style="text-align: right">${valCantina.toFixed(2)}</td>
+            <td style="text-align: right">${valSalgadadas.toFixed(2)}</td>
+            <td style="text-align: right">${valCidade.toFixed(2)}</td>
             <td style="text-align: right">${r.totalGasto.toFixed(2)}</td>
           </tr>`;
           totalTurma += r.totalGasto;
-          totalTurmaCantina += (r.totalCantina || 0);
-          totalTurmaCidade += (r.totalCidade || 0);
+          totalTurmaCantina += valCantina;
+          totalTurmaSalgadadas += valSalgadadas;
+          totalTurmaCidade += valCidade;
         });
 
         // Total Turma
-        html += `<tr><td colspan="5" style="text-align: right"><strong>Total ${turma}:</strong></td><td style="text-align: right"><strong>${totalTurma.toFixed(2)}</strong></td></tr>`;
+        html += `<tr><td colspan="6" style="text-align: right"><strong>Total ${turma}:</strong></td><td style="text-align: right"><strong>${totalTurma.toFixed(2)}</strong></td></tr>`;
         totalGeral += totalTurma;
         totalGeralCantina += totalTurmaCantina;
+        totalGeralSalgadadas += totalTurmaSalgadadas;
         totalGeralCidade += totalTurmaCidade;
       }
     });
 
-    html += `<tr style="background-color: #f39c12; color: white;"><td colspan="5" style="text-align: right"><strong>TOTAL GERAL:</strong></td><td style="text-align: right"><strong>${totalGeral.toFixed(2)}</strong></td></tr>`;
+    html += `<tr style="background-color: #f39c12; color: white;"><td colspan="6" style="text-align: right"><strong>TOTAL GERAL:</strong></td><td style="text-align: right"><strong>${totalGeral.toFixed(2)}</strong></td></tr>`;
     html += '</table>';
 
     // --- RESUMO FINAL (TOTAIS POR ESQUADRÃO) ---
     html += '<br/><br/>';
     html += '<h3 style="font-family: Arial; color: #333;">Resumo Geral por Esquadrão</h3>';
     html += '<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; font-family: Arial; font-size: 12px; border: 1px solid #ddd;">';
-    html += '<tr style="background-color: #2980b9; color: white;"><th>Esquadrão</th><th>Total Cantina (R$)</th><th>Total Cidade (R$)</th><th>Total Geral (R$)</th></tr>';
+    html += '<tr style="background-color: #2980b9; color: white;"><th>Esquadrão</th><th>Total Cantina (R$)</th><th>Total Salgadadas (R$)</th><th>Total Cidade (R$)</th><th>Total Geral (R$)</th></tr>';
 
     resumoPorEsquadrao.dados.forEach(r => {
         html += `<tr>
             <td><strong>${r.turma}</strong></td>
             <td style="text-align: right">${r.totalCantina.toFixed(2)}</td>
+            <td style="text-align: right">${r.totalSalgadadas.toFixed(2)}</td>
             <td style="text-align: right">${r.totalCidade.toFixed(2)}</td>
             <td style="text-align: right">${r.totalGeral.toFixed(2)}</td>
         </tr>`;
@@ -462,6 +554,7 @@ export const DiretoriaPage: React.FC = () => {
     html += `<tr style="background-color: #f59e0b; color: white;">
         <td style="text-align: right"><strong>TOTAL ACUMULADO:</strong></td>
         <td style="text-align: right"><strong>${resumoPorEsquadrao.acumulado.totalCantina.toFixed(2)}</strong></td>
+        <td style="text-align: right"><strong>${resumoPorEsquadrao.acumulado.totalSalgadadas.toFixed(2)}</strong></td>
         <td style="text-align: right"><strong>${resumoPorEsquadrao.acumulado.totalCidade.toFixed(2)}</strong></td>
         <td style="text-align: right"><strong>${resumoPorEsquadrao.acumulado.totalGeral.toFixed(2)}</strong></td>
     </tr>`;
@@ -488,7 +581,13 @@ export const DiretoriaPage: React.FC = () => {
       p.status !== StatusPedido.CANCELADO
     );
 
+    const pedidosNormais = pedidosDoDia.filter(p => !p.isEventoSalgadada);
+    const salgadadas = pedidosDoDia.filter(p => p.isEventoSalgadada);
+
+    const totalNormais = pedidosNormais.reduce((acc, p) => acc + p.valorTotal, 0);
+    const totalSalgadadas = salgadadas.reduce((acc, p) => acc + p.valorTotal, 0);
     const totalDoDia = pedidosDoDia.reduce((acc, p) => acc + p.valorTotal, 0);
+
     const dataFormatada = new Date(dailyReportDate + 'T12:00:00').toLocaleDateString();
     const titulo = `Relatório Diário - Diretoria`;
 
@@ -496,8 +595,9 @@ export const DiretoriaPage: React.FC = () => {
       const wb = XLSX.utils.book_new();
       const wsData: any[][] = [
         [titulo, `Data: ${dataFormatada}`],
-        ["Total de Vendas", `R$ ${totalDoDia.toFixed(2)}`],
-        ["Total de Pedidos", pedidosDoDia.length.toString()],
+        ["Total Geral de Vendas", `R$ ${totalDoDia.toFixed(2)}`, "Quantidade Total", pedidosDoDia.length.toString()],
+        ["Vendas em Pedidos", `R$ ${totalNormais.toFixed(2)}`, "Quantidade de Pedidos", pedidosNormais.length.toString()],
+        ["Vendas em Salgadadas", `R$ ${totalSalgadadas.toFixed(2)}`, "Quantidade de Salgadadas", salgadadas.length.toString()],
         [],
         ["Hora", "Cadete", "Esquadrão", "Itens", "Valor (R$)", "Origem"]
       ];
@@ -506,9 +606,13 @@ export const DiretoriaPage: React.FC = () => {
         const cadete = relatorio.find(r => r.id === p.usuarioId);
         const esquadrao = getEsquadrao(cadete?.numero || '', cadete?.esquadrao);
         const itensStr = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+        const identificador = p.isEventoSalgadada 
+          ? `[Salgadada] ${p.eventoNome || p.usuarioGuerra}` 
+          : p.usuarioGuerra;
+
         wsData.push([
           new Date(p.data).toLocaleTimeString(),
-          p.usuarioGuerra,
+          identificador,
           esquadrao || '-',
           itensStr,
           p.valorTotal.toFixed(2),
@@ -521,20 +625,25 @@ export const DiretoriaPage: React.FC = () => {
       XLSX.writeFile(wb, `relatorio_diario_diretoria_${dailyReportDate}.xlsx`);
     } else {
       const doc = new jsPDF();
-      doc.setFontSize(16);
+      doc.setFontSize(15);
       doc.text(titulo, 14, 16);
       doc.setFontSize(10);
-      doc.text(`Data: ${dataFormatada}`, 14, 24);
-      doc.text(`Total de Vendas: R$ ${totalDoDia.toFixed(2)}`, 14, 30);
-      doc.text(`Total de Pedidos: ${pedidosDoDia.length}`, 14, 36);
+      doc.text(`Data: ${dataFormatada}`, 14, 23);
+      doc.text(`Total Geral de Vendas: R$ ${totalDoDia.toFixed(2)} (${pedidosDoDia.length} registros)`, 14, 29);
+      doc.text(`• Vendas em Pedidos: R$ ${totalNormais.toFixed(2)} (${pedidosNormais.length} pedidos)`, 14, 35);
+      doc.text(`• Vendas em Salgadadas: R$ ${totalSalgadadas.toFixed(2)} (${salgadadas.length} salgadadas)`, 14, 41);
 
       const tableRows = pedidosDoDia.map(p => {
         const cadete = relatorio.find(r => r.id === p.usuarioId);
         const esquadrao = getEsquadrao(cadete?.numero || '', cadete?.esquadrao);
         const itensStr = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+        const identificador = p.isEventoSalgadada 
+          ? `[Salgadada] ${p.eventoNome || p.usuarioGuerra}` 
+          : p.usuarioGuerra;
+
         return [
           new Date(p.data).toLocaleTimeString(),
-          p.usuarioGuerra,
+          identificador,
           esquadrao || '-',
           itensStr,
           `R$ ${p.valorTotal.toFixed(2)}`,
@@ -545,7 +654,7 @@ export const DiretoriaPage: React.FC = () => {
       autoTable(doc, {
         head: [["Hora", "Cadete", "Esquadrão", "Itens", "Valor", "Origem"]],
         body: tableRows,
-        startY: 45,
+        startY: 48,
       });
 
       doc.save(`relatorio_diario_diretoria_${dailyReportDate}.pdf`);
@@ -646,35 +755,104 @@ export const DiretoriaPage: React.FC = () => {
       {/* Modal de Relatório Diário */}
       {isDailyReportModalOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden animate-scale-up">
             <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-gray-900">Relatório Diário</h3>
-              <button onClick={() => setIsDailyReportModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Relatório Diário</h3>
+                <p className="text-xs text-gray-500 font-medium">Diretoria de Cédula</p>
+              </div>
+              <button onClick={() => setIsDailyReportModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 rounded-xl hover:bg-gray-100 transition-colors">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-5">
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Selecione o Dia</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Selecione o Dia</label>
                 <input 
                   type="date" 
                   value={dailyReportDate}
                   onChange={(e) => setDailyReportDate(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-brand-500 focus:border-brand-500 outline-none"
+                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-bold text-gray-800 transition-all"
                 />
               </div>
-              <div className="flex gap-3 pt-4">
+
+              {/* Resumo Visual Interativo dos Dados */}
+              {loadingDailyPreview ? (
+                <div className="py-8 flex flex-col items-center justify-center text-gray-400 gap-2">
+                  <Icons.Refresh className="w-6 h-6 animate-spin text-emerald-600" />
+                  <span className="text-xs font-medium">Calculando movimentação do dia...</span>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Card 1: Total Geral de Vendas */}
+                  <div className="bg-gradient-to-br from-gray-900 to-gray-800 text-white p-4 rounded-2xl shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block">Total Geral de Vendas</span>
+                      <span className="text-2xl font-black text-emerald-400">
+                        R$ {dailyPreviewData.totalGeral.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs bg-white/10 px-2.5 py-1 rounded-full font-bold text-gray-200 block">
+                        {dailyPreviewData.qtdTotal} {dailyPreviewData.qtdTotal === 1 ? 'registro' : 'registros'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cards Grid: Pedidos vs Salgadadas */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Vendas em Pedidos */}
+                    <div className="bg-blue-50/80 border border-blue-100 p-3.5 rounded-2xl">
+                      <div className="flex items-center gap-1.5 text-blue-800 mb-1">
+                        <span className="text-base">🍔</span>
+                        <span className="text-xs font-extrabold">Pedidos Normais</span>
+                      </div>
+                      <div className="text-lg font-black text-blue-900">
+                        R$ {dailyPreviewData.totalPedidos.toFixed(2)}
+                      </div>
+                      <span className="text-[11px] text-blue-600 font-semibold">
+                        {dailyPreviewData.qtdPedidos} {dailyPreviewData.qtdPedidos === 1 ? 'pedido' : 'pedidos'}
+                      </span>
+                    </div>
+
+                    {/* Vendas em Salgadadas */}
+                    <div className="bg-amber-50/80 border border-amber-100 p-3.5 rounded-2xl">
+                      <div className="flex items-center gap-1.5 text-amber-800 mb-1">
+                        <span className="text-base">🎉</span>
+                        <span className="text-xs font-extrabold">Salgadadas</span>
+                      </div>
+                      <div className="text-lg font-black text-amber-900">
+                        R$ {dailyPreviewData.totalSalgadadas.toFixed(2)}
+                      </div>
+                      <span className="text-[11px] text-amber-600 font-semibold">
+                        {dailyPreviewData.qtdSalgadadas} {dailyPreviewData.qtdSalgadadas === 1 ? 'salgadada' : 'salgadadas'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {dailyPreviewData.qtdTotal === 0 && (
+                    <p className="text-center text-xs text-gray-400 py-1 font-medium">
+                      Nenhuma movimentação registrada nesta data.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Botões de Ação */}
+              <div className="flex gap-3 pt-2">
                 <button 
                   onClick={() => handleExportDailyReport('XLSX')}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-green-600/20 transition-all"
+                  disabled={loadingDailyPreview}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-95"
                 >
-                  Baixar Excel
+                  <span className="text-lg">📊</span> Baixar Excel
                 </button>
                 <button 
                   onClick={() => handleExportDailyReport('PDF')}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-red-600/20 transition-all"
+                  disabled={loadingDailyPreview}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-red-600/20 transition-all flex items-center justify-center gap-2 active:scale-95"
                 >
-                  Baixar PDF
+                  <span className="text-lg">📄</span> Baixar PDF
                 </button>
               </div>
             </div>
@@ -792,6 +970,7 @@ export const DiretoriaPage: React.FC = () => {
                     <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs uppercase tracking-wider">
                       <th className="p-4 font-bold">Esquadrão</th>
                       <th className="p-4 font-bold text-right text-gray-400">Total Cantina</th>
+                      <th className="p-4 font-bold text-right text-amber-500">Total Salgadadas</th>
                       <th className="p-4 font-bold text-right text-blue-400">Total Cidade</th>
                       <th className="p-4 font-bold text-right text-gray-800">Total Geral</th>
                     </tr>
@@ -801,6 +980,7 @@ export const DiretoriaPage: React.FC = () => {
                       <tr key={idx} className="hover:bg-gray-50 transition-colors text-sm">
                         <td className="p-4 font-bold text-gray-700">{r.turma}</td>
                         <td className="p-4 text-right font-mono text-gray-500 font-medium">R$ {r.totalCantina.toFixed(2)}</td>
+                        <td className="p-4 text-right font-mono text-amber-600 font-medium">R$ {r.totalSalgadadas.toFixed(2)}</td>
                         <td className="p-4 text-right font-mono text-blue-500 font-medium">R$ {r.totalCidade.toFixed(2)}</td>
                         <td className="p-4 text-right font-mono text-gray-900 font-bold">R$ {r.totalGeral.toFixed(2)}</td>
                       </tr>
@@ -808,6 +988,7 @@ export const DiretoriaPage: React.FC = () => {
                     <tr className="bg-brand-50 border-t-2 border-brand-100">
                       <td className="p-4 font-extrabold text-brand-800 uppercase text-xs tracking-wider">Total Acumulado</td>
                       <td className="p-4 text-right font-mono text-brand-700 font-bold">R$ {resumoPorEsquadrao.acumulado.totalCantina.toFixed(2)}</td>
+                      <td className="p-4 text-right font-mono text-amber-700 font-bold">R$ {resumoPorEsquadrao.acumulado.totalSalgadadas.toFixed(2)}</td>
                       <td className="p-4 text-right font-mono text-brand-700 font-bold">R$ {resumoPorEsquadrao.acumulado.totalCidade.toFixed(2)}</td>
                       <td className="p-4 text-right font-mono text-brand-900 font-extrabold text-lg">R$ {resumoPorEsquadrao.acumulado.totalGeral.toFixed(2)}</td>
                     </tr>
@@ -844,6 +1025,7 @@ export const DiretoriaPage: React.FC = () => {
                           <th className="p-5 font-bold hidden md:table-cell">Nome Completo</th>
                           <th className="p-5 font-bold text-center">Qtd</th>
                           <th className="p-5 font-bold text-right text-gray-400">Cantina</th>
+                          <th className="p-5 font-bold text-right text-amber-500">Salgadada</th>
                           <th className="p-5 font-bold text-right text-blue-400">Cidade</th>
                           <th className="p-5 font-bold text-right">Total</th>
                         </tr>
@@ -860,7 +1042,10 @@ export const DiretoriaPage: React.FC = () => {
                             <td className="p-5 text-gray-500 hidden md:table-cell">{r.nome}</td>
                             <td className="p-5 text-center text-gray-600 font-medium">{r.qtdPedidos}</td>
                             <td className="p-5 text-right font-mono text-gray-400 font-medium">
-                              R$ {(r.totalCantina || 0).toFixed(2)}
+                              R$ {(r.totalPedidosCantina ?? r.totalCantina ?? 0).toFixed(2)}
+                            </td>
+                            <td className="p-5 text-right font-mono text-amber-600 font-medium">
+                              R$ {(r.totalSalgadadas ?? 0).toFixed(2)}
                             </td>
                             <td className="p-5 text-right font-mono text-blue-500 font-medium">
                               R$ {(r.totalCidade || 0).toFixed(2)}

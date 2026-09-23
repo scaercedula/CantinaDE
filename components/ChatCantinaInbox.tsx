@@ -20,6 +20,7 @@ const RESPOSTAS_RAPIDAS = [
 
 export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesIniciais }) => {
   const [conversas, setConversas] = useState<ConversaPreview[]>([]);
+  // Sempre inicia sem nenhum cadete selecionado (tela em branco), conforme solicitação
   const [cadeteAtivo, setCadeteAtivo] = useState<Usuario | null>(null);
   const [mensagens, setMensagens] = useState<MensagemChatDecifrada[]>([]);
   const [novoTexto, setNovoTexto] = useState('');
@@ -37,7 +38,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Carrega lista de cadetes e histórico das conversas
+  // Carrega lista de cadetes e histórico das conversas sem auto-seleção
   const carregarTodasConversas = async () => {
     setCarregandoConversas(true);
     try {
@@ -48,16 +49,6 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       if (cadetes) {
         const previews = await chatService.getConversasCantina(cadetes);
         setConversas(previews);
-
-        // Se nenhum cadete estiver selecionado, seleciona o primeiro que tiver mensagens
-        if (!cadeteAtivo && previews.length > 0) {
-          const primeiroComMensagem = previews.find(p => p.ultimaMensagem);
-          if (primeiroComMensagem) {
-            setCadeteAtivo(primeiroComMensagem.cadete);
-          } else {
-            setCadeteAtivo(previews[0].cadete);
-          }
-        }
       }
     } catch (e) {
       console.error('Erro ao carregar conversas da cantina:', e);
@@ -99,7 +90,6 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       chatService.getConversasCantina(cadetes).then(novasConversas => {
         setConversas(prev => {
           if (prev.length === 0) return novasConversas;
-          // Atualiza apenas se houve alteração de contagem ou última mensagem
           const mudou = novasConversas.some((nc, idx) => {
             const pc = prev[idx];
             return !pc || pc.cadete.id !== nc.cadete.id || pc.naoLidas !== nc.naoLidas || pc.atualizadoEm !== nc.atualizadoEm;
@@ -114,11 +104,14 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       unsubUnread();
       clearInterval(intervalConversas);
     };
-  }, [cadeteAtivo, cadetesIniciais]);
+  }, [cadetesIniciais]); // Desacoplado de cadeteAtivo para não redefinir seleção ao alternar conversas
 
   // Carrega mensagens do cadete ativo com polling em tempo real
   useEffect(() => {
-    if (!cadeteAtivo) return;
+    if (!cadeteAtivo) {
+      setMensagens([]);
+      return;
+    }
 
     let cancelado = false;
     setCarregandoMensagens(true);
@@ -180,7 +173,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       unsubCanal();
       clearInterval(intervalMsgs);
     };
-  }, [cadeteAtivo]);
+  }, [cadeteAtivo?.id]);
 
   // Auto-scroll
   useEffect(() => {
@@ -202,7 +195,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       perfil: 'CANTINA',
       nomeCompleto: 'Cantina da DE',
       nomeDeGuerra: 'Cantina',
-      email: '',
+      email: 'cantinade@gmail.com',
       numero: ''
     } as any;
 
@@ -262,11 +255,11 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
   const totalNaoLidasGeral = conversas.reduce((acc, c) => acc + c.naoLidas, 0);
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 flex flex-col md:flex-row h-[750px] max-h-[82vh] overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-xl border border-gray-100 flex flex-col md:flex-row h-[calc(100dvh-200px)] min-h-[520px] md:h-[750px] overflow-hidden">
       {/* ================= COLUNA ESQUERDA: INBOX / LISTA DE CADETES ================= */}
-      <div className={`w-full md:w-80 lg:w-96 border-r border-gray-100 flex flex-col bg-gray-50/50 ${cadeteAtivo ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`w-full md:w-80 lg:w-96 border-r border-gray-100 flex flex-col bg-gray-50/50 ${cadeteAtivo ? 'hidden md:flex' : 'flex'} h-full min-h-0`}>
         {/* Cabeçalho da Inbox */}
-        <div className="p-4 bg-white border-b border-gray-100 flex items-center justify-between">
+        <div className="p-3.5 sm:p-4 bg-white border-b border-gray-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center font-bold text-lg shadow-sm">
               <Icons.Chat className="w-5 h-5" />
@@ -303,7 +296,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
         </div>
 
         {/* Busca e Filtros de Cadetes */}
-        <div className="p-3 bg-white border-b border-gray-100 space-y-2">
+        <div className="p-3 bg-white border-b border-gray-100 space-y-2 shrink-0">
           <div className="relative">
             <Icons.Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
             <input
@@ -353,7 +346,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
           </div>
         </div>
 
-        {/* Lista de Conversas */}
+        {/* Lista de Conversas com Scroll independente */}
         <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
           {carregandoConversas && conversas.length === 0 ? (
             <div className="p-8 text-center text-gray-400 text-xs">
@@ -361,8 +354,18 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
               Carregando cadetes...
             </div>
           ) : conversasFiltradas.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-xs">
-              Nenhuma conversa encontrada com esse filtro.
+            <div className="p-8 text-center text-gray-400 text-xs space-y-2">
+              <span className="text-2xl">📭</span>
+              <p>Nenhuma conversa encontrada com esse filtro.</p>
+              {apenasNaoLidas && (
+                <button
+                  type="button"
+                  onClick={() => setApenasNaoLidas(false)}
+                  className="text-emerald-600 font-bold hover:underline block mx-auto text-[11px]"
+                >
+                  Ver todas as conversas
+                </button>
+              )}
             </div>
           ) : (
             conversasFiltradas.map((conv) => {
@@ -388,7 +391,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
                       {conv.cadete.nomeDeGuerra.slice(0, 2).toUpperCase()}
                     </div>
                     {conv.naoLidas > 0 && (
-                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full ring-2 ring-white flex items-center justify-center">
+                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full ring-2 ring-white flex items-center justify-center animate-bounce">
                         {conv.naoLidas}
                       </span>
                     )}
@@ -397,8 +400,11 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
                   {/* Detalhes do Cadete e Última Mensagem */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline justify-between mb-0.5">
-                      <h4 className="font-bold text-xs sm:text-sm text-gray-900 truncate">
+                      <h4 className="font-bold text-xs sm:text-sm text-gray-900 truncate flex items-center gap-1.5">
                         {conv.cadete.nomeDeGuerra}
+                        {conv.naoLidas > 0 && (
+                          <span className="w-2 h-2 rounded-full bg-red-500 inline-block shrink-0" />
+                        )}
                       </h4>
                       <span className="text-[10px] text-gray-400 shrink-0 font-medium">
                         {dataMsg}
@@ -411,7 +417,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
                       <span className="text-gray-400 truncate">{esquadrao}</span>
                     </div>
 
-                    <p className={`text-xs truncate ${conv.naoLidas > 0 ? 'font-bold text-gray-900' : 'text-gray-500'}`}>
+                    <p className={`text-xs truncate ${conv.naoLidas > 0 ? 'font-black text-gray-900' : 'text-gray-500'}`}>
                       {conv.ultimaMensagem ? conv.ultimaMensagem.texto : 'Nenhuma mensagem recente'}
                     </p>
                   </div>
@@ -423,41 +429,47 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
       </div>
 
       {/* ================= COLUNA DIREITA: JANELA DE CONVERSA ATIVA ================= */}
-      <div className={`flex-1 flex flex-col bg-white ${!cadeteAtivo ? 'hidden md:flex items-center justify-center' : 'flex'}`}>
+      <div className={`flex-1 flex flex-col bg-white ${!cadeteAtivo ? 'hidden md:flex' : 'flex'} h-full min-h-0`}>
         {cadeteAtivo ? (
           <>
             {/* Topo da Conversa com Cadete */}
-            <div className="p-3.5 sm:p-4 bg-white border-b border-gray-100 flex items-center justify-between shadow-xs">
-              <div className="flex items-center gap-3">
-                {/* Botão Voltar no Mobile */}
+            <div className="p-3 sm:p-4 bg-white border-b border-gray-100 flex items-center justify-between shadow-xs shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                {/* Botão Voltar para Lista com Destaque e Contador */}
                 <button
                   type="button"
                   onClick={() => setCadeteAtivo(null)}
-                  className="p-1.5 -ml-1 text-gray-500 hover:text-gray-900 rounded-lg md:hidden"
-                  title="Voltar para lista"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold text-xs transition-colors shrink-0 active:scale-95"
+                  title="Voltar para a lista de conversas"
                 >
-                  <Icons.ArrowDown className="w-5 h-5 rotate-90" />
+                  <span className="text-sm font-black">←</span>
+                  <span className="hidden sm:inline">Conversas</span>
+                  {totalNaoLidasGeral > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-red-600 text-white text-[10px] font-black">
+                      {totalNaoLidasGeral}
+                    </span>
+                  )}
                 </button>
 
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center font-bold text-xs sm:text-sm shadow-sm shrink-0">
                   {cadeteAtivo.nomeDeGuerra.slice(0, 2).toUpperCase()}
                 </div>
 
-                <div>
-                  <h3 className="font-bold text-gray-900 text-sm sm:text-base leading-tight">
+                <div className="min-w-0">
+                  <h3 className="font-bold text-gray-900 text-xs sm:text-base leading-tight truncate">
                     {cadeteAtivo.nomeDeGuerra}
                   </h3>
-                  <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
+                  <p className="text-[11px] sm:text-xs text-gray-500 flex items-center gap-1 mt-0.5 truncate">
                     <span>Nº {cadeteAtivo.numero}</span>
                     <span>•</span>
                     <span>{getEsquadrao(cadeteAtivo.numero)}</span>
-                    <span>•</span>
-                    <span className="text-gray-400 truncate max-w-[120px] sm:max-w-none">{cadeteAtivo.nomeCompleto}</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span className="text-gray-400 truncate hidden sm:inline">{cadeteAtivo.nomeCompleto}</span>
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
                   onClick={() => setExibirBuscaConversa(!exibirBuscaConversa)}
@@ -473,7 +485,7 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
 
             {/* Barra de Pesquisa na Conversa Atual */}
             {exibirBuscaConversa && (
-              <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2 animate-slide-down">
+              <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center gap-2 animate-slide-down shrink-0">
                 <Icons.Search className="w-4 h-4 text-gray-400" />
                 <input
                   type="text"
@@ -496,31 +508,29 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
             )}
 
             {/* Banner de Segurança E2EE */}
-            <div className="bg-emerald-50/60 border-b border-emerald-100/50 px-4 py-1.5 flex items-center justify-center gap-1.5 text-[11px] text-emerald-800 font-medium">
+            <div className="bg-emerald-50/60 border-b border-emerald-100/50 px-4 py-1 flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] text-emerald-800 font-medium shrink-0">
               <Icons.Lock className="w-3 h-3 text-emerald-600" />
               <span>Canal Criptografado de Ponta a Ponta (AES-256)</span>
             </div>
 
-            {/* Histórico de Mensagens */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-gray-50/40 to-white">
+            {/* Histórico de Mensagens com Scroll independente */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 bg-gradient-to-b from-gray-50/40 to-white min-h-0">
               {carregandoMensagens ? (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400 text-xs py-8">
                   <Icons.Refresh className="w-6 h-6 animate-spin text-emerald-600 mb-2" />
                   Carregando mensagens criptografadas...
                 </div>
               ) : mensagensFiltradas.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center p-8 text-gray-400">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
-                    <Icons.Chat className="w-6 h-6" />
-                  </div>
-                  <p className="font-bold text-gray-700 text-sm">Conversa com {cadeteAtivo.nomeDeGuerra}</p>
-                  <p className="text-xs text-gray-500 mt-1 max-w-sm">
-                    Nenhuma mensagem registrada ainda. Utilize as respostas rápidas abaixo ou envie uma mensagem personalizada.
+                <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-400">
+                  <span className="text-3xl mb-2">💬</span>
+                  <p className="font-bold text-gray-700 text-sm">Nenhuma mensagem nesta conversa</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Envie uma resposta rápida ou digite uma mensagem abaixo para iniciar.
                   </p>
                 </div>
               ) : (
                 mensagensFiltradas.map((msg) => {
-                  const souEu = msg.remetentePerfil === 'CANTINA';
+                  const isMinha = msg.isMinha;
                   const horaFormatada = new Date(msg.timestamp).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit'
@@ -529,59 +539,63 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
                   return (
                     <div
                       key={msg.id}
-                      className={`flex flex-col ${souEu ? 'items-end' : 'items-start'} transition-all`}
+                      className={`flex flex-col ${isMinha ? 'items-end' : 'items-start'} animate-fade-in`}
                     >
+                      {!isMinha && (
+                        <span className="text-[10px] text-gray-500 font-semibold mb-1 ml-1 flex items-center gap-1">
+                          <span>👤</span> {msg.remetenteNome}
+                        </span>
+                      )}
+
                       <div
-                        className={`max-w-[85%] sm:max-w-[70%] rounded-2xl p-3 shadow-xs text-sm relative ${
-                          souEu
-                            ? 'bg-gray-900 text-white rounded-br-xs'
-                            : 'bg-white text-gray-800 border border-gray-100 rounded-bl-xs'
+                        className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-3.5 py-2.5 text-xs shadow-xs ${
+                          isMinha
+                            ? 'bg-emerald-600 text-white rounded-br-xs'
+                            : 'bg-white border border-gray-200 text-gray-900 rounded-bl-xs shadow-sm'
                         }`}
                       >
-                        {/* Card de Pedido Vinculado */}
+                        {/* Pedido Vinculado / Anexo */}
                         {msg.pedidoVinculado && (
                           <div
-                            className={`mb-2 p-2.5 rounded-xl border text-xs ${
-                              souEu
-                                ? 'bg-gray-800 border-gray-700 text-white'
-                                : 'bg-emerald-50 border-emerald-100 text-emerald-950'
+                            className={`mb-2 p-2 rounded-xl border text-[11px] ${
+                              isMinha
+                                ? 'bg-emerald-700/60 border-emerald-500/60 text-white'
+                                : 'bg-gray-50 border-gray-200 text-gray-800'
                             }`}
                           >
                             <div className="flex items-center justify-between font-bold mb-1">
                               <span className="flex items-center gap-1">
-                                <Icons.ShoppingBag className="w-3.5 h-3.5 text-emerald-500" />
+                                <Icons.ShoppingBag className="w-3.5 h-3.5" />
                                 Pedido #{msg.pedidoVinculado.id.slice(-5)}
                               </span>
-                              <span className="text-emerald-500 font-black">
-                                R$ {Number(msg.pedidoVinculado.valorTotal).toFixed(2)}
-                              </span>
+                              <span>R$ {Number(msg.pedidoVinculado.valorTotal).toFixed(2)}</span>
                             </div>
-                            <p className="text-gray-600 line-clamp-2 my-1">
+                            <p className={`line-clamp-2 ${isMinha ? 'text-emerald-100' : 'text-gray-600'}`}>
                               {msg.pedidoVinculado.itensResumo}
                             </p>
-                            <div className="flex items-center justify-between text-[10px] font-semibold text-gray-500">
+                            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold">
                               <span>Status: {msg.pedidoVinculado.status}</span>
                               <span>{new Date(msg.pedidoVinculado.data).toLocaleDateString()}</span>
                             </div>
                           </div>
                         )}
 
-                        {/* Texto da Mensagem */}
-                        <p className="whitespace-pre-wrap break-words leading-relaxed">
+                        {/* Texto */}
+                        <p className="whitespace-pre-wrap break-words leading-relaxed text-xs sm:text-sm">
                           {msg.texto}
                         </p>
 
-                        {/* Rodapé da Bolha */}
+                        {/* Rodapé da bolha */}
                         <div
                           className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-                            souEu ? 'text-gray-400' : 'text-gray-400'
+                            isMinha ? 'text-emerald-200' : 'text-gray-400'
                           }`}
                         >
                           <span>{horaFormatada}</span>
-                          {souEu && (
+                          {isMinha && (
                             <span>
                               {msg.lida ? (
-                                <Icons.CheckCheck className="w-3.5 h-3.5 text-sky-400 inline" />
+                                <Icons.CheckCheck className="w-3.5 h-3.5 text-sky-300 inline" />
                               ) : (
                                 <Icons.Check className="w-3.5 h-3.5 inline" />
                               )}
@@ -596,8 +610,8 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Barra de Respostas Rápidas (Canned Responses) */}
-            <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 overflow-x-auto flex items-center gap-2 no-scrollbar">
+            {/* Atalhos de Resposta Rápida */}
+            <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 overflow-x-auto flex items-center gap-2 no-scrollbar shrink-0">
               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 shrink-0">
                 Respostas Rápidas:
               </span>
@@ -615,20 +629,20 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
             </div>
 
             {/* Campo de Envio de Mensagem */}
-            <form onSubmit={handleEnviar} className="p-3 bg-white border-t border-gray-100 flex items-center gap-2">
+            <form onSubmit={handleEnviar} className="p-3 bg-white border-t border-gray-100 flex items-center gap-2 shrink-0">
               <input
                 ref={inputRef}
                 type="text"
                 value={novoTexto}
                 onChange={(e) => setNovoTexto(e.target.value)}
                 placeholder={`Responder a ${cadeteAtivo.nomeDeGuerra}...`}
-                className="flex-1 bg-gray-100 hover:bg-gray-50 focus:bg-white text-gray-900 px-4 py-2.5 text-sm rounded-2xl border border-transparent focus:border-gray-900 focus:outline-none transition-all placeholder-gray-400"
+                className="flex-1 bg-gray-100 hover:bg-gray-50 focus:bg-white text-gray-900 px-4 py-2.5 text-xs sm:text-sm rounded-2xl border border-transparent focus:border-emerald-600 focus:outline-none transition-all placeholder-gray-400"
                 disabled={enviando}
               />
               <button
                 type="submit"
                 disabled={!novoTexto.trim() || enviando}
-                className="p-2.5 bg-gray-900 hover:bg-black disabled:bg-gray-200 text-white rounded-2xl transition-all shadow-md active:scale-95 disabled:shadow-none flex items-center justify-center shrink-0"
+                className="p-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 text-white rounded-2xl transition-all shadow-md active:scale-95 disabled:shadow-none flex items-center justify-center shrink-0"
                 title="Enviar resposta"
               >
                 {enviando ? (
@@ -640,14 +654,32 @@ export const ChatCantinaInbox: React.FC<ChatCantinaInboxProps> = ({ cadetesInici
             </form>
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center p-8 text-gray-400">
-            <div className="w-16 h-16 rounded-3xl bg-gray-100 text-gray-400 flex items-center justify-center mb-4 text-2xl">
+          /* Estado Inicial em Branco (Conforme solicitado pelo usuário) */
+          <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center bg-gray-50/50">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4 text-3xl shadow-sm">
               💬
             </div>
-            <h3 className="font-bold text-gray-700 text-base">Selecione uma conversa</h3>
-            <p className="text-xs text-gray-500 mt-1 max-w-xs">
-              Escolha um cadete na lista à esquerda para visualizar o histórico de mensagens e responder em tempo real.
+            <h3 className="font-extrabold text-gray-900 text-lg sm:text-xl">Central de Mensagens da Cantina</h3>
+            <p className="text-xs sm:text-sm text-gray-500 mt-2 max-w-md leading-relaxed">
+              Selecione uma conversa na lista ao lado para visualizar o histórico criptografado e responder diretamente aos cadetes.
             </p>
+
+            {totalNaoLidasGeral > 0 ? (
+              <div className="mt-6 flex flex-col items-center gap-2.5 p-4 bg-white rounded-2xl border border-red-200 shadow-sm animate-pulse">
+                <span className="text-xs font-black text-red-600 flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span>
+                  Você tem {totalNaoLidasGeral} mensagem(ns) pendente(s) de resposta!
+                </span>
+                <p className="text-[11px] text-gray-500">
+                  Toque em uma das conversas não lidas na lista para abrir e responder.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-6 inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 rounded-full border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                <Icons.CheckCheck className="w-4 h-4 text-emerald-600" />
+                <span>Todas as conversas estão em dia!</span>
+              </div>
+            )}
           </div>
         )}
       </div>

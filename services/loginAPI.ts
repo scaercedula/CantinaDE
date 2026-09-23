@@ -8,6 +8,7 @@ const GOOGLE_SHEET_ID = import.meta.env.VITE_SHEET_ID;
 
 class BackendService {
   private pb: PocketBase;
+  private relatorioCache: Map<string, any[]> = new Map();
   
   constructor() {
     this.pb = new PocketBase(POCKETBASE_URL);
@@ -16,6 +17,10 @@ class BackendService {
 
   getPb(): PocketBase {
     return this.pb;
+  }
+
+  limparCacheRelatorio(): void {
+    this.relatorioCache.clear();
   }
 
 
@@ -460,11 +465,11 @@ class BackendService {
             return {
               id: e.id,
               usuarioId: filtroUsuarioId,
-              usuarioNome: 'Participante', // Irrelevante aqui
+              usuarioNome: 'Participante',
               usuarioGuerra: 'Participante',
               itens: [{
                 id: 'evento',
-                nome: e.nome, // Nome do evento como nome do item
+                nome: e.nome,
                 descricao: 'Participação em Salgadada',
                 preco: valorIndividual,
                 quantidade: 1,
@@ -481,6 +486,34 @@ class BackendService {
           });
         } catch (err) {
           console.warn('Coleção eventos_salgadada pode não existir ainda:', err);
+        }
+      } else if (!filtroUsuarioId && (!origem || origem === 'CANTINA')) {
+        // Para fechamento do dia e faturamento geral da Cantina:
+        // Inclui eventos de Salgadada com status CONCLUIDO (entregues/finalizados)
+        try {
+          const eventosConcluidos = await this.pb.collection('eventos_salgadada').getFullList({
+            filter: `status = "${StatusPedido.CONCLUIDO}"`,
+            sort: '-created',
+            expand: 'responsavel'
+          });
+
+          eventosFormatados = eventosConcluidos.map((e: any) => ({
+            id: e.id,
+            usuarioId: e.responsavel || '',
+            usuarioNome: e.expand?.responsavel?.nomeCompleto || 'Evento Salgadada',
+            usuarioGuerra: e.expand?.responsavel?.nomeDeGuerra || e.responsavelNome || 'Salgadada',
+            itens: e.itens || [],
+            valorTotal: Number(e.valorTotal) || 0,
+            status: e.status,
+            data: e.created,
+            userAgent: '',
+            ip: '',
+            isEventoSalgadada: true,
+            eventoNome: e.nome,
+            origem: 'CANTINA' as OrigemPedido
+          }));
+        } catch (err) {
+          console.warn('Erro ao carregar salgadadas concluídas para o fechamento:', err);
         }
       }
 
@@ -511,82 +544,103 @@ class BackendService {
     }
   }
 
-  async getRelatorioFinanceiro(dataInicio?: Date, dataFim?: Date): Promise<any[]> {
+  async getRelatorioFinanceiro(dataInicio?: Date, dataFim?: Date, forcarAtualizacao = false): Promise<any[]> {
+    const cacheKey = `${dataInicio ? dataInicio.toISOString().slice(0, 10) : 'all'}_${dataFim ? dataFim.toISOString().slice(0, 10) : 'all'}`;
+    if (!forcarAtualizacao && this.relatorioCache.has(cacheKey)) {
+      return this.relatorioCache.get(cacheKey)!;
+    }
+
     try {
-      const cadetes = await this.pb.collection('users').getFullList({ 
-        filter: `perfil = "${PerfilUsuario.CADETE}"` 
-      });
-      
-      // 1. Busca Pedidos Normais (excluindo cotas geradas anteriormente para evitar duplicação)
-      const pedidos = await this.pb.collection('pedidos').getFullList({ 
-        filter: `status != "${StatusPedido.CANCELADO}"`,
-        sort: '-created'
-      });
+      let pedidosFilter = `status != "${StatusPedido.CANCELADO}"`;
+      let eventosFilter = `status = "${StatusPedido.CONCLUIDO}"`;
 
-      // 2. Busca Eventos de Salgadada CONCLUÍDOS
-      const eventosSalgadada = await this.pb.collection('eventos_salgadada').getFullList({
-        filter: `status = "${StatusPedido.CONCLUIDO}"`,
-        sort: '-created'
-      });
+      if (dataInicio && dataFim) {
+        const inicioStr = dataInicio.toISOString();
+        const fimStr = dataFim.toISOString();
+        pedidosFilter += ` && created >= "${inicioStr}" && created <= "${fimStr}"`;
+        eventosFilter += ` && created >= "${inicioStr}" && created <= "${fimStr}"`;
+      }
 
-      // Filtra Pedidos por Data
-      const pedidosFiltrados = pedidos.map((p: any) => {
-         let origem = p.origem;
-         if (!origem && p.itens?.[0]?.id?.startsWith('cid-')) origem = 'CIDADE';
-         return { ...p, origem: origem || 'CANTINA' };
-      }).filter((p: any) => {
-         // Ignora pedidos de cota antigos para usar a lógica nova baseada em eventos
-         if (p.itens?.[0]?.id?.startsWith('rateio-')) return false;
+      // Executa buscas concorrentes no PocketBase
+      const [cadetes, pedidos, eventosSalgadada] = await Promise.all([
+        this.pb.collection('users').getFullList({ 
+          filter: `perfil = "${PerfilUsuario.CADETE}"`,
+          sort: 'nomeDeGuerra'
+        }),
+        this.pb.collection('pedidos').getFullList({ 
+          filter: pedidosFilter,
+          sort: '-created'
+        }),
+        this.pb.collection('eventos_salgadada').getFullList({ 
+          filter: eventosFilter,
+          sort: '-created'
+        })
+      ]);
 
-         if (!dataInicio && !dataFim) return true;
-         const dataPedido = new Date(p.created);
-         if (dataInicio && dataPedido.getTime() < dataInicio.getTime()) return false;
-         if (dataFim && dataPedido.getTime() > dataFim.getTime()) return false;
-         return true;
-      });
+      // Indexação O(1) de Pedidos por usuário
+      const pedidosPorCadete = new Map<string, any[]>();
+      for (const p of pedidos) {
+        if (p.itens?.[0]?.id?.startsWith('rateio-')) continue;
+        let origem = p.origem;
+        if (!origem && p.itens?.[0]?.id?.startsWith('cid-')) origem = 'CIDADE';
+        origem = origem || 'CANTINA';
 
-      // Filtra Eventos por Data
-      const eventosFiltrados = eventosSalgadada.filter((e: any) => {
-         if (!dataInicio && !dataFim) return true;
-         const dataEvento = new Date(e.created);
-         if (dataInicio && dataEvento.getTime() < dataInicio.getTime()) return false;
-         if (dataFim && dataEvento.getTime() > dataFim.getTime()) return false;
-         return true;
-      });
+        if (!pedidosPorCadete.has(p.usuarioId)) {
+          pedidosPorCadete.set(p.usuarioId, []);
+        }
+        pedidosPorCadete.get(p.usuarioId)!.push({ ...p, origem });
+      }
 
-      return cadetes.map((cadete: any) => {
-        // Soma Pedidos Normais
-        const pedidosCadete = pedidosFiltrados.filter((p: any) => p.usuarioId === cadete.id);
-        
-        // Separa por origem
-        const pedidosCantina = pedidosCadete.filter((p: any) => !p.origem || p.origem === 'CANTINA');
-        const pedidosCidade = pedidosCadete.filter((p: any) => p.origem === 'CIDADE');
+      // Indexação O(1) de Salgadadas por participante
+      const salgadadasPorCadete = new Map<string, { cota: number; data: string }[]>();
+      for (const e of eventosSalgadada) {
+        const participantes: string[] = e.participantes || [];
+        if (participantes.length === 0) continue;
+        const cota = (Number(e.valorTotal) || 0) / participantes.length;
+        for (const cadeteId of participantes) {
+          if (!salgadadasPorCadete.has(cadeteId)) {
+            salgadadasPorCadete.set(cadeteId, []);
+          }
+          salgadadasPorCadete.get(cadeteId)!.push({ cota, data: e.created });
+        }
+      }
 
-        const totalPedidosCantina = pedidosCantina.reduce((acc: number, curr: any) => acc + (Number(curr.valorTotal) || 0), 0);
-        const totalPedidosCidade = pedidosCidade.reduce((acc: number, curr: any) => acc + (Number(curr.valorTotal) || 0), 0);
-        
-        // Soma Participação em Salgadadas (Sempre Cantina)
-        const eventosParticipados = eventosFiltrados.filter((e: any) => e.participantes?.includes(cadete.id));
-        const totalSalgadadas = eventosParticipados.reduce((acc: number, curr: any) => {
-            const numParticipantes = curr.participantes?.length || 1;
-            const cota = (Number(curr.valorTotal) || 0) / numParticipantes;
-            return acc + cota;
-        }, 0);
+      const resultado = cadetes.map((cadete: any) => {
+        const pedidosCadete = pedidosPorCadete.get(cadete.id) || [];
+        const eventosParticipados = salgadadasPorCadete.get(cadete.id) || [];
+
+        let totalPedidosCantina = 0;
+        let totalPedidosCidade = 0;
+
+        for (const p of pedidosCadete) {
+          const val = Number(p.valorTotal) || 0;
+          if (p.origem === 'CIDADE') {
+            totalPedidosCidade += val;
+          } else {
+            totalPedidosCantina += val;
+          }
+        }
+
+        let totalSalgadadas = 0;
+        for (const s of eventosParticipados) {
+          totalSalgadadas += s.cota;
+        }
 
         const totalCantina = totalPedidosCantina + totalSalgadadas;
         const totalCidade = totalPedidosCidade;
         const totalGasto = totalCantina + totalCidade;
-        
         const qtdPedidos = pedidosCadete.length + eventosParticipados.length;
-        
-        // Determina última atividade (pedido ou salgadada)
-        let ultimaCompra = null;
-        if (pedidosCadete.length > 0) ultimaCompra = pedidosCadete[0].created;
+
+        // Determina última atividade
+        let ultimaCompra: string | null = null;
+        if (pedidosCadete.length > 0) {
+          ultimaCompra = pedidosCadete[0].created;
+        }
         if (eventosParticipados.length > 0) {
-            const ultimaSalgadada = eventosParticipados[0].created;
-            if (!ultimaCompra || new Date(ultimaSalgadada) > new Date(ultimaCompra)) {
-                ultimaCompra = ultimaSalgadada;
-            }
+          const ultimaSalgadada = eventosParticipados[0].data;
+          if (!ultimaCompra || new Date(ultimaSalgadada) > new Date(ultimaCompra)) {
+            ultimaCompra = ultimaSalgadada;
+          }
         }
 
         return {
@@ -596,13 +650,18 @@ class BackendService {
           numero: cadete.numero || '---',
           totalGasto,
           totalCantina,
+          totalPedidosCantina,
+          totalSalgadadas,
           totalCidade,
           ultimaCompra,
           qtdPedidos
         };
       });
+
+      this.relatorioCache.set(cacheKey, resultado);
+      return resultado;
     } catch (e) {
-      console.error('Erro ao gerar relatório:', e);
+      console.error('Erro ao gerar relatório otimizado:', e);
       return [];
     }
   }
