@@ -56,7 +56,8 @@ export const DiretoriaPage: React.FC = () => {
   const [loadingHistorico, setLoadingHistorico] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
-  // Relatório Diário
+  // Relatório Diário e Visão do Faturamento
+  const [tipoVisualizacaoFaturamento, setTipoVisualizacaoFaturamento] = useState<'MES' | 'DIA'>('MES');
   const [isDailyReportModalOpen, setIsDailyReportModalOpen] = useState(false);
   const [dailyReportDate, setDailyReportDate] = useState(new Date().toISOString().split('T')[0]);
   const [loadingDailyPreview, setLoadingDailyPreview] = useState(false);
@@ -102,9 +103,9 @@ export const DiretoriaPage: React.FC = () => {
     loginAPI.getCadetes().then(setCadetes);
   }, [fiscalPeriod]);
 
-  // Carrega prévia do Relatório Diário em tempo real ao selecionar data
+  // Carrega prévia do Relatório Diário em tempo real ao selecionar data ou alternar visão
   useEffect(() => {
-    if (!isDailyReportModalOpen) return;
+    if (!isDailyReportModalOpen && tipoVisualizacaoFaturamento !== 'DIA') return;
     let cancelado = false;
     setLoadingDailyPreview(true);
 
@@ -142,7 +143,7 @@ export const DiretoriaPage: React.FC = () => {
 
     calcularPreview();
     return () => { cancelado = true; };
-  }, [isDailyReportModalOpen, dailyReportDate]);
+  }, [isDailyReportModalOpen, tipoVisualizacaoFaturamento, dailyReportDate]);
 
   const handleSaveParticipantes = async () => {
     if (!editingEvento) return;
@@ -687,8 +688,8 @@ export const DiretoriaPage: React.FC = () => {
           </GlassCard>
         </div>
 
-        <div className="w-full flex flex-col md:flex-row items-center justify-between gap-6 pt-4 border-t border-gray-100">
-          <div className="flex p-1 bg-gray-100 rounded-xl">
+        <div className="w-full flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pt-4 border-t border-gray-100">
+          <div className="flex p-1 bg-gray-100 rounded-xl shrink-0">
             <button
               onClick={() => setTab('RESUMO')}
               className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${tab === 'RESUMO' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
@@ -703,14 +704,113 @@ export const DiretoriaPage: React.FC = () => {
             </button>
           </div>
 
-          <div>
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Montante Total ({MESES[selectedMonth]})</span>
-            <span className="text-3xl font-extrabold text-brand-600">R$ {totalGeral.toFixed(2)}</span>
-            <p className="text-[10px] text-gray-400 mt-1">
-              {fiscalPeriod.startDate.toLocaleDateString()} até {fiscalPeriod.endDate.toLocaleDateString()}
-            </p>
+          <div className="flex-1 w-full max-w-2xl">
+            {/* Seletor Mês / Dia */}
+            <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 mb-3">
+              <div className="flex bg-gray-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setTipoVisualizacaoFaturamento('MES')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    tipoVisualizacaoFaturamento === 'MES'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  📅 Mês ({MESES[selectedMonth]})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoVisualizacaoFaturamento('DIA')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    tipoVisualizacaoFaturamento === 'DIA'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  ☀️ Dia Específico
+                </button>
+              </div>
+
+              {tipoVisualizacaoFaturamento === 'DIA' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-gray-400 uppercase hidden sm:inline">Data:</span>
+                  <input
+                    type="date"
+                    value={dailyReportDate}
+                    onChange={(e) => setDailyReportDate(e.target.value)}
+                    className="text-xs bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-xl font-bold text-gray-800 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all cursor-pointer shadow-2xs"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Conteúdo: Visão Mensal vs Visão Diária */}
+            {tipoVisualizacaoFaturamento === 'MES' ? (
+              <div>
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Montante Total ({MESES[selectedMonth]})</span>
+                <span className="text-3xl font-extrabold text-brand-600">R$ {totalGeral.toFixed(2)}</span>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  {fiscalPeriod.startDate.toLocaleDateString()} até {fiscalPeriod.endDate.toLocaleDateString()}
+                </p>
+              </div>
+            ) : (
+              <div className="animate-fade-in pt-1">
+                {loadingDailyPreview ? (
+                  <div className="py-2 flex items-center gap-2 text-gray-400 text-xs">
+                    <Icons.Refresh className="w-4 h-4 animate-spin text-emerald-600" />
+                    <span>Calculando arrecadação do dia...</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* Total Geral do Dia */}
+                    <div className="bg-gradient-to-br from-gray-900 to-gray-800 text-white p-3.5 rounded-2xl shadow-xs">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Total do Dia</span>
+                      <div className="flex items-baseline justify-between mt-1">
+                        <span className="text-xl font-black text-emerald-400">
+                          R$ {dailyPreviewData.totalGeral.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full font-bold text-gray-200">
+                          {dailyPreviewData.qtdTotal} {dailyPreviewData.qtdTotal === 1 ? 'registro' : 'registros'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Pedidos Normais */}
+                    <div className="bg-blue-50/80 border border-blue-100 p-3.5 rounded-2xl">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 block flex items-center gap-1">
+                        <span>🍔</span> Vendas Normais
+                      </span>
+                      <div className="flex items-baseline justify-between mt-1">
+                        <span className="text-lg font-black text-blue-900">
+                          R$ {dailyPreviewData.totalPedidos.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-blue-600 font-bold">
+                          {dailyPreviewData.qtdPedidos} {dailyPreviewData.qtdPedidos === 1 ? 'pedido' : 'pedidos'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Salgadadas */}
+                    <div className="bg-amber-50/80 border border-amber-100 p-3.5 rounded-2xl">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block flex items-center gap-1">
+                        <span>🎉</span> Salgadadas
+                      </span>
+                      <div className="flex items-baseline justify-between mt-1">
+                        <span className="text-lg font-black text-amber-900">
+                          R$ {dailyPreviewData.totalSalgadadas.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-amber-800 font-bold">
+                          {dailyPreviewData.qtdSalgadadas} {dailyPreviewData.qtdSalgadadas === 1 ? 'salgadada' : 'salgadadas'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
               className="w-full md:w-auto bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2"
