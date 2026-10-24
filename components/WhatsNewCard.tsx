@@ -3,34 +3,39 @@ import { createPortal } from 'react-dom';
 import { Icons } from './Icons';
 
 interface WhatsNewCardProps {
+  isOpen?: boolean;
+  onClose?: () => void;
   onOpenChat?: () => void;
 }
 
-const SESSION_KEY = 'cantina_whats_new_session_viewed_v3';
-
-export const WhatsNewCard: React.FC<WhatsNewCardProps> = ({ onOpenChat }) => {
-  // Abre automaticamente a cada novo login / sessão até ser fechado
-  const [isOpen, setIsOpen] = useState(false);
+export const WhatsNewCard: React.FC<WhatsNewCardProps> = ({ 
+  isOpen: externalIsOpen, 
+  onClose, 
+  onOpenChat 
+}) => {
+  // Não abre mais automaticamente no login; abre apenas sob demanda do usuário
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    try {
-      const alreadySeenThisSession = sessionStorage.getItem(SESSION_KEY);
-      if (!alreadySeenThisSession) {
-        setIsOpen(true);
-      }
-    } catch {
-      setIsOpen(true);
-    }
+
+    const handleCustomOpen = () => setInternalIsOpen(true);
+    window.addEventListener('abrir-whats-new', handleCustomOpen);
+
+    return () => {
+      window.removeEventListener('abrir-whats-new', handleCustomOpen);
+    };
   }, []);
 
+  const isVisible = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+
   const handleCloseAndProceed = () => {
-    setIsOpen(false);
-    try {
-      sessionStorage.setItem(SESSION_KEY, 'true');
-    } catch (e) {
-      console.warn('Erro ao salvar no sessionStorage:', e);
+    if (externalIsOpen === undefined) {
+      setInternalIsOpen(false);
+    }
+    if (onClose) {
+      onClose();
     }
   };
 
@@ -44,7 +49,7 @@ export const WhatsNewCard: React.FC<WhatsNewCardProps> = ({ onOpenChat }) => {
   };
 
   // Não renderiza nada se não estiver aberto ou fora do navegador
-  if (!mounted || !isOpen) {
+  if (!mounted || !isVisible) {
     return null;
   }
 

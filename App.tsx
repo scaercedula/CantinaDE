@@ -7,7 +7,7 @@ import { CadetePage } from './pages/CadetePage';
 import { CantinaPage } from './pages/CantinaPage';
 import { DiretoriaPage } from './pages/DiretoriaPage';
 import { ChatToastNotification } from './components/ChatToastNotification';
-
+import { AdBanner } from './components/AdBanner';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<Usuario | null>(null);
@@ -52,9 +52,12 @@ const App: React.FC = () => {
     );
   }
 
+  // O perfil CANTINA é 100% livre de anúncios. Cadete e Diretoria visualizam os espaços de anúncios.
+  const canShowAds = user.perfil !== PerfilUsuario.CANTINA;
+
   return (
     <div className="min-h-screen pb-24 md:pb-12 bg-gray-50 text-gray-900 font-sans">
-      <nav className="sticky top-0 z-40 w-full bg-white shadow-sm border-b border-gray-100 mb-8">
+      <nav className="sticky top-0 z-40 w-full bg-white shadow-sm border-b border-gray-100 mb-6">
         <div className="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
             <div>
@@ -70,11 +73,25 @@ const App: React.FC = () => {
         </div>
       </nav>
 
+      {/* Anúncio Superior (não exibido para perfil Cantina) */}
+      {canShowAds && (
+        <div className="max-w-6xl mx-auto px-4 md:px-6 mb-6">
+          <AdBanner format="horizontal" minHeight="min-h-[90px]" />
+        </div>
+      )}
+
       <main className="max-w-6xl mx-auto px-4 md:px-6 animate-fade-in">
         {user.perfil === PerfilUsuario.CADETE && <CadetePage usuario={user} />}
         {user.perfil === PerfilUsuario.CANTINA && <CantinaPage />}
         {user.perfil === PerfilUsuario.DIRETORIA && <DiretoriaPage />}
       </main>
+
+      {/* Anúncio Rodapé (não exibido para perfil Cantina) */}
+      {canShowAds && (
+        <div className="max-w-6xl mx-auto px-4 md:px-6 mt-8 mb-6">
+          <AdBanner format="horizontal" minHeight="min-h-[90px]" />
+        </div>
+      )}
 
       {/* Notificações flutuantes em tempo real do Chat */}
       <ChatToastNotification usuarioAtual={user} />

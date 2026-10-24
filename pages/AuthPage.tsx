@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Usuario } from '../types';
 import { loginAPI } from '../services/loginAPI';
 import { GlassCard, GlassInput, GlassButton } from '../components/GlassUI';
+import { AdBanner } from '../components/AdBanner';
 
 interface AuthPageProps {
   onLogin: (u: Usuario) => void;
@@ -175,6 +176,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
             )}
           </div>
         </GlassCard>
+        
+        {/* Espaço de Anúncio Google AdSense na Tela de Login */}
+        <AdBanner format="horizontal" minHeight="min-h-[90px]" />
         
         <p className="text-center text-gray-400 text-xs mt-8">© 2025 V.1.0 - Desenvolvido por Cad Felipe</p>
         <p className="text-center text-gray-400 text-xs mt-2">Powered by Google Ai Studio</p>

@@ -10,7 +10,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { ChatCantinaInbox } from '../components/ChatCantinaInbox';
 import { chatService } from '../services/chatService';
-import { WhatsNewCard } from '../components/WhatsNewCard';
+
 
 
 

@@ -21,6 +21,7 @@ const MESES = [
 
 export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const [tab, setTab] = useState<'MENU' | 'PEDIDOS' | 'SALGADADA' | 'MINHAS_SALGADADAS' | 'CIDADE'>('MENU');
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [produtosCidade, setProdutosCidade] = useState<Produto[]>([]);
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
@@ -446,10 +447,10 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
       </div>
 
       {/* Card O que há de novo (What's New) */}
-      <WhatsNewCard />
+      <WhatsNewCard isOpen={showWhatsNew} onClose={() => setShowWhatsNew(false)} />
 
       {/* Navigation Tabs - Simplificado (Murphy's Law: Obvious & Simple) */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <button
           onClick={() => setTab('MENU')}
           className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MENU' ? 'bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
@@ -487,7 +488,16 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
           className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'SALGADADA' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
         >
           <Icons.Plus className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Fazer pedido de salgadada</span>
+          <span className="text-[10px] font-bold uppercase tracking-wide">Fazer pedido</span>
+        </button>
+
+        <button
+          onClick={() => setShowWhatsNew(true)}
+          className="p-4 rounded-2xl flex flex-col items-center gap-2 transition-all bg-white text-gray-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 border border-gray-100 group shadow-xs active:scale-95"
+          title="Ver o que há de novo no sistema"
+        >
+          <span className="text-xl group-hover:scale-110 transition-transform">✨</span>
+          <span className="text-[10px] font-bold uppercase tracking-wide">Novidades</span>
         </button>
       </div>
 
