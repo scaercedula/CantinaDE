@@ -54,6 +54,7 @@ const App: React.FC = () => {
 
   // O perfil CANTINA é 100% livre de anúncios. Cadete e Diretoria visualizam os espaços de anúncios.
   const canShowAds = user.perfil !== PerfilUsuario.CANTINA;
+  const isCadete23 = user.perfil === PerfilUsuario.CADETE && numeroStr.startsWith('23');
 
   return (
     <div className="min-h-screen pb-24 md:pb-12 bg-gray-50 text-gray-900 font-sans">
@@ -93,8 +94,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Notificações flutuantes em tempo real do Chat */}
-      <ChatToastNotification usuarioAtual={user} />
+      {/* Notificações flutuantes em tempo real do Chat (desativadas para cadetes 23) */}
+      {!isCadete23 && <ChatToastNotification usuarioAtual={user} />}
     </div>
   );
 };

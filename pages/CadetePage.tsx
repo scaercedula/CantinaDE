@@ -20,13 +20,20 @@ const MESES = [
 ];
 
 export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
-  const [tab, setTab] = useState<'MENU' | 'PEDIDOS' | 'SALGADADA' | 'MINHAS_SALGADADAS' | 'CIDADE'>('MENU');
+  const isFormando23 = String(usuario.numero || '').trim().startsWith('23');
+  const [tab, setTab] = useState<'MENU' | 'PEDIDOS' | 'SALGADADA' | 'MINHAS_SALGADADAS' | 'CIDADE'>(() => isFormando23 ? 'PEDIDOS' : 'MENU');
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [produtosCidade, setProdutosCidade] = useState<Produto[]>([]);
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
   const [carrinhoCidade, setCarrinhoCidade] = useState<ItemCarrinho[]>([]);
   const [historico, setHistorico] = useState<Pedido[]>([]);
+
+  useEffect(() => {
+    if (isFormando23 && (tab === 'MENU' || tab === 'CIDADE' || tab === 'SALGADADA')) {
+      setTab('PEDIDOS');
+    }
+  }, [isFormando23, tab]);
 
   // Estados para Salgadada
   const [usuariosDisponiveis, setUsuariosDisponiveis] = useState<Usuario[]>([]);
@@ -143,6 +150,10 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   };
 
   const criarSalgadada = async () => {
+    if (isFormando23) {
+      alert("Pedidos encerrados para formandos. Apenas consulta ao histórico permitida.");
+      return;
+    }
     if (!salgadadaNome || salgadadaParticipantes.length === 0 || salgadadaItens.length === 0) {
       alert("Preencha o nome do evento, selecione participantes e adicione itens.");
       return;
@@ -180,6 +191,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const valorPorPessoa = salgadadaParticipantes.length > 0 ? valorTotalSalgadada / salgadadaParticipantes.length : 0;
 
   const addToCart = (p: Produto, origem: 'CANTINA' | 'CIDADE' = 'CANTINA') => {
+    if (isFormando23) return;
     const setTargetCarrinho = origem === 'CANTINA' ? setCarrinho : setCarrinhoCidade;
 
     setTargetCarrinho(prev => {
@@ -207,6 +219,10 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   };
 
   const finalizarPedido = async (origem: 'CANTINA' | 'CIDADE' = 'CANTINA') => {
+    if (isFormando23) {
+      alert("Pedidos encerrados para formandos. Apenas consulta ao histórico permitida.");
+      return;
+    }
     const targetCarrinho = origem === 'CANTINA' ? carrinho : carrinhoCidade;
     const setTargetCarrinho = origem === 'CANTINA' ? setCarrinho : setCarrinhoCidade;
 
@@ -287,7 +303,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
   const qtdItensCarrinhoCidade = carrinhoCidade.reduce((acc, i) => acc + i.quantidade, 0);
 
   const renderFloatingCart = () => {
-    if (carrinho.length === 0) return null;
+    if (isFormando23 || carrinho.length === 0) return null;
 
     return createPortal(
       <>
@@ -402,6 +418,33 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-24">
+      {/* Banner Especial de Formatura (Cadetes Turma 23) */}
+      {isFormando23 && (
+        <div className="relative overflow-hidden rounded-3xl p-6 md:p-8 bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white shadow-xl shadow-amber-500/20 border border-amber-300/30 animate-fade-in">
+          <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-white/10 rounded-full blur-xl pointer-events-none" />
+          <div className="absolute top-2 right-4 text-6xl opacity-15 select-none pointer-events-none">
+            🎓
+          </div>
+          
+          <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
+            <div className="w-14 h-14 shrink-0 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-3xl shadow-inner border border-white/30">
+              🎓
+            </div>
+            <div className="space-y-1.5 flex-1">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-black/20 text-amber-100 text-xs font-bold uppercase tracking-wider">
+                <span>⭐ Formatura 4º Ano</span>
+              </div>
+              <h2 className="text-xl md:text-2xl font-black text-white tracking-tight leading-snug">
+                Parabéns pela jornada, Cadete {usuario.nomeDeGuerra}!
+              </h2>
+              <p className="text-amber-50 text-sm md:text-base font-medium leading-relaxed italic">
+                "Foi um prazer estar com vocês durante esse período, mas tudo que é bom chega ao fim, boa formatura!"
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Simplificado */}
       <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col items-center text-center relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-brand-400 to-blue-500"></div>
@@ -413,7 +456,6 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
         <p className="text-gray-400 text-xs">
           Período: {fiscalPeriod.startDate.toLocaleDateString()} a {fiscalPeriod.endDate.toLocaleDateString()}
         </p>
-
 
         {/* Seletor de Mês Minimalista */}
         <div className="relative">
@@ -446,62 +488,82 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
         </div>
       </div>
 
-      {/* Card O que há de novo (What's New) */}
-      <WhatsNewCard isOpen={showWhatsNew} onClose={() => setShowWhatsNew(false)} />
+      {/* Card O que há de novo (What's New) - apenas para cadetes com compras ativas */}
+      {!isFormando23 && <WhatsNewCard isOpen={showWhatsNew} onClose={() => setShowWhatsNew(false)} />}
 
-      {/* Navigation Tabs - Simplificado (Murphy's Law: Obvious & Simple) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <button
-          onClick={() => setTab('MENU')}
-          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MENU' ? 'bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
-        >
-          <Icons.ShoppingBag className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Cantina da D.E</span>
-        </button>
+      {/* Navigation Tabs */}
+      {isFormando23 ? (
+        <div className="grid grid-cols-2 gap-3 max-w-md mx-auto w-full">
+          <button
+            onClick={() => setTab('PEDIDOS')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'PEDIDOS' ? 'bg-gray-800 text-white shadow-lg' : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.History className="w-6 h-6" />
+            <span className="text-xs font-bold uppercase tracking-wide">Histórico</span>
+          </button>
 
-        <button
-          onClick={() => setTab('CIDADE')}
-          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'CIDADE' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
-        >
-          <Icons.ShoppingBag className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Loja da Cidade</span>
-        </button>
+          <button
+            onClick={() => setTab('MINHAS_SALGADADAS')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MINHAS_SALGADADAS' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.Users className="w-6 h-6" />
+            <span className="text-xs font-bold uppercase tracking-wide">Salgadadas</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <button
+            onClick={() => setTab('MENU')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MENU' ? 'bg-brand-600 text-white shadow-lg shadow-brand-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.ShoppingBag className="w-6 h-6" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Cantina da D.E</span>
+          </button>
 
-        <button
-          onClick={() => setTab('PEDIDOS')}
-          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'PEDIDOS' ? 'bg-gray-800 text-white shadow-lg' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
-        >
-          <Icons.History className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Histórico</span>
-        </button>
+          <button
+            onClick={() => setTab('CIDADE')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'CIDADE' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.ShoppingBag className="w-6 h-6" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Loja da Cidade</span>
+          </button>
 
-        <button
-          onClick={() => setTab('MINHAS_SALGADADAS')}
-          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MINHAS_SALGADADAS' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
-        >
-          <Icons.Users className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Salgadadas</span>
-        </button>
+          <button
+            onClick={() => setTab('PEDIDOS')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'PEDIDOS' ? 'bg-gray-800 text-white shadow-lg' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.History className="w-6 h-6" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Histórico</span>
+          </button>
 
-        <button
-          onClick={() => setTab('SALGADADA')}
-          className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'SALGADADA' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
-        >
-          <Icons.Plus className="w-6 h-6" />
-          <span className="text-[10px] font-bold uppercase tracking-wide">Fazer pedido</span>
-        </button>
+          <button
+            onClick={() => setTab('MINHAS_SALGADADAS')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'MINHAS_SALGADADAS' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.Users className="w-6 h-6" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Salgadadas</span>
+          </button>
 
-        <button
-          onClick={() => setShowWhatsNew(true)}
-          className="p-4 rounded-2xl flex flex-col items-center gap-2 transition-all bg-white text-gray-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 border border-gray-100 group shadow-xs active:scale-95"
-          title="Ver o que há de novo no sistema"
-        >
-          <span className="text-xl group-hover:scale-110 transition-transform">✨</span>
-          <span className="text-[10px] font-bold uppercase tracking-wide">Novidades</span>
-        </button>
-      </div>
+          <button
+            onClick={() => setTab('SALGADADA')}
+            className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all ${tab === 'SALGADADA' ? 'bg-green-600 text-white shadow-lg shadow-green-200' : 'bg-white text-gray-400 hover:bg-gray-50 border border-gray-100'}`}
+          >
+            <Icons.Plus className="w-6 h-6" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Fazer pedido</span>
+          </button>
 
-      {tab === 'CIDADE' && (
+          <button
+            onClick={() => setShowWhatsNew(true)}
+            className="p-4 rounded-2xl flex flex-col items-center gap-2 transition-all bg-white text-gray-500 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 border border-gray-100 group shadow-xs active:scale-95"
+            title="Ver o que há de novo no sistema"
+          >
+            <span className="text-xl group-hover:scale-110 transition-transform">✨</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide">Novidades</span>
+          </button>
+        </div>
+      )}
+
+      {!isFormando23 && tab === 'CIDADE' && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-24">
           <div className="col-span-full mb-4 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-3">
             <div className="p-2 bg-blue-100 rounded-full text-blue-600">
@@ -635,7 +697,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
         </div>
       )}
 
-      {tab === 'SALGADADA' && (
+      {!isFormando23 && tab === 'SALGADADA' && (
         <div className="space-y-6 pb-20 animate-fade-in">
           <GlassCard className="!p-6">
             <h2 className="text-xl font-bold text-gray-800 mb-4">Nova Salgadada</h2>
@@ -976,7 +1038,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
         </div>
       )}
 
-      {tab === 'MENU' ? (
+      {!isFormando23 && tab === 'MENU' ? (
         <div className="space-y-6 pb-48">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {produtos.map(p => (
@@ -1055,7 +1117,7 @@ export const CadetePage: React.FC<CadetePageProps> = ({ usuario }) => {
       )}
 
       {/* Chat em Tempo Real com Criptografia E2EE */}
-      <ChatWidgetCadete usuario={usuario} ultimoPedido={historico[0]} />
+      {!isFormando23 && <ChatWidgetCadete usuario={usuario} ultimoPedido={historico[0]} />}
     </div>
   );
 };

@@ -232,6 +232,11 @@ class BackendService {
 
   async criarPedido(usuario: Usuario, itens: any[], total: number, options?: { ip?: string, userAgent?: string, status?: StatusPedido, origem?: OrigemPedido }): Promise<ApiResponse<Pedido>> {
     try {
+      const numeroStr = String(usuario.numero || '').trim();
+      if (usuario.perfil === PerfilUsuario.CADETE && numeroStr.startsWith('23')) {
+        return { sucesso: false, mensagem: 'Pedidos encerrados para cadetes formandos. Apenas consulta ao histórico disponível.' };
+      }
+
       const dados = {
         usuarioId: usuario.id,
         usuarioNome: usuario.nomeCompleto,
@@ -258,12 +263,14 @@ class BackendService {
 
   async getUsuariosParaSalgadada(): Promise<Usuario[]> {
     try {
-      // Filtra apenas usuários com perfil CADETE, conforme solicitado
+      // Filtra apenas usuários com perfil CADETE e exclui formandos (turma 23)
       const records = await this.pb.collection('users').getFullList({
         filter: `perfil = "${PerfilUsuario.CADETE}"`,
         sort: 'nomeDeGuerra'
       });
-      return records.map(r => this.mapUser(r));
+      return records
+        .map(r => this.mapUser(r))
+        .filter(u => !String(u.numero || '').trim().startsWith('23'));
     } catch (e) {
       console.error('Erro ao buscar usuários:', e);
       return [];
